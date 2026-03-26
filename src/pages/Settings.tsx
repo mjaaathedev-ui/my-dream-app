@@ -26,7 +26,7 @@ export default function Settings() {
   const [hasFunding, setHasFunding] = useState(profile?.has_funding_condition || false);
   const [fundingCondition, setFundingCondition] = useState(profile?.funding_condition || '');
   const [dailyTarget, setDailyTarget] = useState([profile?.daily_study_target_hours || 4]);
-  const [emailReminders, setEmailReminders] = useState(profile?.email_reminders_enabled || true);
+  const [emailReminders, setEmailReminders] = useState<boolean>(profile?.email_reminders_enabled ?? true);
   const [saving, setSaving] = useState(false);
 
   const saveProfile = async () => {
