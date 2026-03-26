@@ -32,7 +32,7 @@ export default function Grades() {
   const [mName, setMName] = useState('');
   const [mCode, setMCode] = useState('');
   const [mCredits, setMCredits] = useState('16');
-  const [mColor, setMColor] = useState(MODULE_COLORS[0]);
+  const [mColor, setMColor] = useState<string>(MODULE_COLORS[0]);
   const [mSemester, setMSemester] = useState('');
 
   // Assessment form
