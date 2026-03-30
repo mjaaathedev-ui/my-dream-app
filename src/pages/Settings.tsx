@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { Save } from 'lucide-react';
-import { CAREER_FIELDS, YEAR_OPTIONS } from '@/types/database';
+import { Save, MessageSquare, Bell, Shield } from 'lucide-react';
+import { CAREER_FIELDS, YEAR_OPTIONS, SESSION_TYPES } from '@/types/database';
 
 export default function Settings() {
   const { profile, user, refreshProfile, signOut } = useAuth();
@@ -27,7 +28,22 @@ export default function Settings() {
   const [fundingCondition, setFundingCondition] = useState(profile?.funding_condition || '');
   const [dailyTarget, setDailyTarget] = useState([profile?.daily_study_target_hours || 4]);
   const [emailReminders, setEmailReminders] = useState<boolean>(profile?.email_reminders_enabled ?? true);
+  const [reminderDaysBefore, setReminderDaysBefore] = useState([profile?.reminder_days_before || 3]);
+  const [defaultSessionType, setDefaultSessionType] = useState(profile?.default_session_type || 'pomodoro');
+  const [defaultPomodoro, setDefaultPomodoro] = useState([profile?.default_pomodoro_minutes || 50]);
+  const [checkinTime, setCheckinTime] = useState(profile?.preferred_checkin_time || '07:00');
+  const [timezone, setTimezone] = useState(profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+  // WhatsApp
+  const [whatsappNumber, setWhatsappNumber] = useState(profile?.whatsapp_number || '');
+  const [whatsappEnabled, setWhatsappEnabled] = useState(profile?.whatsapp_enabled || false);
+
   const [saving, setSaving] = useState(false);
+
+  const maskPhone = (num: string) => {
+    if (!num || num.length < 8) return num;
+    return num.substring(0, 4) + '** *** ' + num.substring(num.length - 4);
+  };
 
   const saveProfile = async () => {
     if (!user) return;
@@ -38,6 +54,13 @@ export default function Settings() {
       target_average: targetAverage[0], has_funding_condition: hasFunding,
       funding_condition: hasFunding ? fundingCondition : '',
       daily_study_target_hours: dailyTarget[0], email_reminders_enabled: emailReminders,
+      reminder_days_before: reminderDaysBefore[0],
+      default_session_type: defaultSessionType,
+      default_pomodoro_minutes: defaultPomodoro[0],
+      preferred_checkin_time: checkinTime,
+      timezone,
+      whatsapp_number: whatsappNumber,
+      whatsapp_enabled: whatsappEnabled,
     }).eq('user_id', user.id);
     if (error) toast.error(error.message);
     else { toast.success('Settings saved'); await refreshProfile(); }
@@ -48,6 +71,7 @@ export default function Settings() {
     <div className="p-6 max-w-[700px] mx-auto space-y-6 animate-fade-in">
       <h1 className="text-xl font-semibold">Settings</h1>
 
+      {/* Profile */}
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Profile</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -73,6 +97,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
+      {/* Targets */}
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Targets</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -91,12 +116,93 @@ export default function Settings() {
         </CardContent>
       </Card>
 
+      {/* Study Preferences */}
       <Card className="border-border shadow-sm">
-        <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Notifications</CardTitle></CardHeader>
-        <CardContent>
+        <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Study Preferences</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Default session type</Label>
+            <Select value={defaultSessionType} onValueChange={setDefaultSessionType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{SESSION_TYPES.filter(t => t.value !== 'custom').map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Default pomodoro length: <span className="font-mono text-primary">{defaultPomodoro[0]} min</span></Label>
+            <Slider value={defaultPomodoro} onValueChange={setDefaultPomodoro} min={15} max={90} step={5} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Preferred check-in time</Label>
+              <Input type="time" value={checkinTime} onChange={e => setCheckinTime(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Timezone</Label>
+              <Input value={timezone} onChange={e => setTimezone(e.target.value)} placeholder="e.g. Africa/Johannesburg" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Notifications */}
+      <Card className="border-border shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <Bell className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Notifications</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <Label>Email reminders</Label><Switch checked={emailReminders} onCheckedChange={setEmailReminders} />
           </div>
+          <div className="space-y-2">
+            <Label>Remind me <span className="font-mono text-primary">{reminderDaysBefore[0]}</span> days before assessments</Label>
+            <Slider value={reminderDaysBefore} onValueChange={setReminderDaysBefore} min={1} max={14} step={1} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* WhatsApp */}
+      <Card className="border-border shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">WhatsApp Notifications</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Phone number</Label>
+            <Input
+              value={whatsappNumber}
+              onChange={e => setWhatsappNumber(e.target.value)}
+              placeholder="+27 81 234 5678"
+            />
+            {profile?.whatsapp_verified && (
+              <p className="text-xs text-success flex items-center gap-1"><Shield className="h-3 w-3" /> Verified: {maskPhone(profile.whatsapp_number)}</p>
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            <Label>Enable WhatsApp notifications</Label>
+            <Switch checked={whatsappEnabled} onCheckedChange={setWhatsappEnabled} />
+          </div>
+          {whatsappEnabled && (
+            <div className="space-y-2 p-3 bg-accent rounded-md">
+              <p className="text-xs font-medium text-muted-foreground">Notification types:</p>
+              <div className="space-y-2">
+                {['Daily check-in', 'Assessment reminders', 'Drift alerts', 'Streak celebrations', 'Weekly summary'].map(item => (
+                  <div key={item} className="flex items-center gap-2">
+                    <Checkbox id={item} defaultChecked />
+                    <label htmlFor={item} className="text-xs">{item}</label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Messages are sent from a Twilio WhatsApp number. Carrier rates may apply. This is a one-way notification service with optional two-way AI advisor replies.
+          </p>
         </CardContent>
       </Card>
 
