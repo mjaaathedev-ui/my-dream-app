@@ -28,12 +28,14 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 async function streamChat({
   messages,
   context,
+  accessToken,
   onDelta,
   onDone,
   onToolResults,
 }: {
   messages: Message[];
   context: string;
+  accessToken: string;
   onDelta: (text: string) => void;
   onDone: () => void;
   onToolResults?: (results: string[]) => void;
@@ -42,7 +44,8 @@ async function streamChat({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      Authorization: `Bearer ${accessToken}`,
+      apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     },
     body: JSON.stringify({ messages, context }),
   });
@@ -258,6 +261,10 @@ export default function Advisor() {
     setLoading(true);
 
     try {
+      // Get access token
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const accessToken = currentSession?.access_token || '';
+
       // Build full context
       let context = await buildUserContext(user.id, profile);
       if (selectedModuleId) {
@@ -279,6 +286,7 @@ export default function Advisor() {
       await streamChat({
         messages: newMessages,
         context,
+        accessToken,
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: async () => {
           setLoading(false);
