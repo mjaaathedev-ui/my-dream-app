@@ -261,6 +261,10 @@ export default function Advisor() {
     setLoading(true);
 
     try {
+      // Get access token
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const accessToken = currentSession?.access_token || '';
+
       // Build full context
       let context = await buildUserContext(user.id, profile);
       if (selectedModuleId) {
@@ -282,6 +286,7 @@ export default function Advisor() {
       await streamChat({
         messages: newMessages,
         context,
+        accessToken,
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: async () => {
           setLoading(false);
