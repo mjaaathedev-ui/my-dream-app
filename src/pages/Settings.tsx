@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -11,8 +11,9 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { Save, MessageSquare, Bell, Shield } from 'lucide-react';
+import { Save, MessageSquare, Bell, Shield, Calendar, Mail, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
 import { CAREER_FIELDS, YEAR_OPTIONS, SESSION_TYPES } from '@/types/database';
+import { useSearchParams } from 'react-router-dom';
 
 export default function Settings() {
   const { profile, user, refreshProfile, signOut } = useAuth();
