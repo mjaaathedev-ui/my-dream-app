@@ -24,6 +24,24 @@ export default function Timetable() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [syncing, setSyncing] = useState(false);
+
+  const syncToGoogleCalendar = async () => {
+    setSyncing(true);
+    const toastId = toast.loading(`Syncing ${entries.length} entries to Google Calendar...`);
+    let synced = 0;
+    for (const entry of entries) {
+      const eventId = await syncTimetableEntry(entry);
+      if (eventId) synced++;
+    }
+    toast.dismiss(toastId);
+    if (synced > 0) {
+      toast.success(`Synced ${synced}/${entries.length} entries to Google Calendar`);
+    } else {
+      toast.error('No entries synced. Make sure Google is connected in Settings.');
+    }
+    setSyncing(false);
+  };
 
   // Form
   const [title, setTitle] = useState('');
