@@ -101,6 +101,9 @@ export default function Timetable() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">Timetable</h1>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={syncToGoogleCalendar} disabled={syncing || entries.length === 0} className="gap-1.5">
+            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} /> Sync to Google Calendar
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}>
             {viewMode === 'grid' ? 'List view' : 'Grid view'}
           </Button>
