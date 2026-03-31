@@ -20,24 +20,62 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading } = useAuth();
-  if (loading) return (
+// Full-screen spinner shown while we wait for the initial auth check
+function LoadingScreen() {
+  return (
     <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
     </div>
   );
+}
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, profile, loading } = useAuth();
+
+  // Still resolving the session — show spinner, NEVER redirect yet
+  if (loading) return <LoadingScreen />;
+
+  // No session at all → go to auth
   if (!user) return <Navigate to="/auth" replace />;
-  if (profile && !profile.onboarding_completed) return <Navigate to="/onboarding" replace />;
+
+  // Session exists but profile hasn't loaded yet — wait a tick
+  // (profile fetch is async; it's null for ~200ms after login)
+  if (profile === null) return <LoadingScreen />;
+
+  // Profile loaded and onboarding not done → send to onboarding
+  if (!profile.onboarding_completed) return <Navigate to="/onboarding" replace />;
+
   return <>{children}</>;
 }
 
 function OnboardingRoute() {
   const { user, profile, loading } = useAuth();
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
+
+  if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/auth" replace />;
-  if (profile?.onboarding_completed) return <Navigate to="/dashboard" replace />;
+
+  // Wait for profile to load before deciding
+  if (profile === null) return <LoadingScreen />;
+
+  // Already completed onboarding → go to dashboard
+  if (profile.onboarding_completed) return <Navigate to="/dashboard" replace />;
+
   return <Onboarding />;
+}
+
+function AuthRoute() {
+  const { user, profile, loading } = useAuth();
+
+  if (loading) return <LoadingScreen />;
+
+  // Already signed in
+  if (user) {
+    if (profile === null) return <LoadingScreen />;
+    if (!profile.onboarding_completed) return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Auth />;
 }
 
 const App = () => (
@@ -49,7 +87,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/auth" element={<Auth />} />
+            <Route path="/auth" element={<AuthRoute />} />
             <Route path="/onboarding" element={<OnboardingRoute />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<Dashboard />} />
