@@ -55,6 +55,7 @@ export interface Assessment {
   max_mark: number;
   submitted: boolean;
   notes: string;
+  google_event_id?: string | null;
   created_at: string;
   // joined
   module?: Module;
