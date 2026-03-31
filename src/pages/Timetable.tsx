@@ -9,7 +9,9 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Plus, Calendar, Trash2 } from 'lucide-react';
+import { Plus, Calendar, Trash2, RefreshCw } from 'lucide-react';
+import type { Module, TimetableEntry } from '@/types/database';
+import { syncTimetableEntry, isGoogleConnected } from '@/lib/google-calendar';
 import type { Module, TimetableEntry } from '@/types/database';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
