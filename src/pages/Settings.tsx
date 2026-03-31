@@ -40,6 +40,77 @@ export default function Settings() {
   const [whatsappEnabled, setWhatsappEnabled] = useState(profile?.whatsapp_enabled || false);
 
   const [saving, setSaving] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Google integration state
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleTokenCreatedAt, setGoogleTokenCreatedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check google connection status
+    const checkGoogle = async () => {
+      const { data } = await supabase.from('google_tokens').select('id, created_at').single();
+      if (data) {
+        setGoogleConnected(true);
+        setGoogleTokenCreatedAt(data.created_at);
+      }
+    };
+    checkGoogle();
+
+    // Handle callback
+    const googleParam = searchParams.get('google');
+    if (googleParam === 'connected') {
+      toast.success('Google account connected!');
+      setGoogleConnected(true);
+      searchParams.delete('google');
+      setSearchParams(searchParams, { replace: true });
+    } else if (googleParam === 'error') {
+      toast.error('Failed to connect Google account');
+      searchParams.delete('google');
+      searchParams.delete('reason');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []);
+
+  const connectGoogle = async () => {
+    setGoogleLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error('Please sign in first'); return; }
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth?action=auth`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error(data.error || 'Failed to start Google auth');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to connect');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const disconnectGoogle = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth?action=disconnect`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+      setGoogleConnected(false);
+      setGoogleTokenCreatedAt(null);
+      toast.success('Google account disconnected');
+    } catch {
+      toast.error('Failed to disconnect');
+    }
+  };
 
   const maskPhone = (num: string) => {
     if (!num || num.length < 8) return num;
