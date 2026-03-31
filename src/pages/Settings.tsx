@@ -235,7 +235,73 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* WhatsApp */}
+      {/* Google Integrations */}
+      <Card className="border-border shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Google Integrations</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-3 bg-accent/50 rounded-md text-xs text-muted-foreground flex items-start gap-2">
+            <ExternalLink className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            Connect Google to sync your timetable and receive email reminders about assessments.
+          </div>
+
+          {/* Google Calendar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              <div>
+                <p className="text-sm font-medium">Google Calendar</p>
+                <div className="flex items-center gap-1.5">
+                  {googleConnected ? (
+                    <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
+                  ) : (
+                    <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+                  )}
+                </div>
+                {googleConnected && googleTokenCreatedAt && (
+                  <p className="text-[10px] text-muted-foreground">Connected {new Date(googleTokenCreatedAt).toLocaleDateString()}</p>
+                )}
+              </div>
+            </div>
+            {googleConnected ? (
+              <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
+            ) : (
+              <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
+                {googleLoading ? 'Connecting...' : 'Connect'}
+              </Button>
+            )}
+          </div>
+
+          {/* Gmail */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mail className="h-4 w-4" />
+              <div>
+                <p className="text-sm font-medium">Gmail</p>
+                <div className="flex items-center gap-1.5">
+                  {googleConnected ? (
+                    <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
+                  ) : (
+                    <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+                  )}
+                </div>
+              </div>
+            </div>
+            {googleConnected ? (
+              <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
+            ) : (
+              <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
+                {googleLoading ? 'Connecting...' : 'Connect'}
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
