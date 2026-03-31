@@ -9,8 +9,9 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Plus, Calendar, Trash2 } from 'lucide-react';
+import { Plus, Calendar, Trash2, RefreshCw } from 'lucide-react';
 import type { Module, TimetableEntry } from '@/types/database';
+import { syncTimetableEntry, isGoogleConnected } from '@/lib/google-calendar';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const HOURS = Array.from({ length: 16 }, (_, i) => i + 7); // 7-22
@@ -23,6 +24,24 @@ export default function Timetable() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [syncing, setSyncing] = useState(false);
+
+  const syncToGoogleCalendar = async () => {
+    setSyncing(true);
+    const toastId = toast.loading(`Syncing ${entries.length} entries to Google Calendar...`);
+    let synced = 0;
+    for (const entry of entries) {
+      const eventId = await syncTimetableEntry(entry);
+      if (eventId) synced++;
+    }
+    toast.dismiss(toastId);
+    if (synced > 0) {
+      toast.success(`Synced ${synced}/${entries.length} entries to Google Calendar`);
+    } else {
+      toast.error('No entries synced. Make sure Google is connected in Settings.');
+    }
+    setSyncing(false);
+  };
 
   // Form
   const [title, setTitle] = useState('');
@@ -82,6 +101,9 @@ export default function Timetable() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">Timetable</h1>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={syncToGoogleCalendar} disabled={syncing || entries.length === 0} className="gap-1.5">
+            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} /> Sync to Google Calendar
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}>
             {viewMode === 'grid' ? 'List view' : 'Grid view'}
           </Button>

@@ -46,6 +46,7 @@ import {
 import type { Module, Assessment } from "@/types/database";
 import { ASSESSMENT_TYPES, MODULE_COLORS } from "@/types/database";
 import TranscriptUpload from "@/components/TranscriptUpload";
+import { createCalendarEvent, isGoogleConnected } from "@/lib/google-calendar";
 
 export default function Grades() {
   const { user, profile } = useAuth();
@@ -210,7 +211,30 @@ export default function Grades() {
       toast.error(error.message);
       return;
     }
-    setAssessments([...assessments, data as Assessment]);
+    const assessment = data as Assessment;
+
+    // Sync to Google Calendar if connected and has due date
+    if (aDueDate) {
+      try {
+        const connected = await isGoogleConnected();
+        if (connected) {
+          const eventId = await createCalendarEvent({
+            title: `[${selectedModule.code}] — ${aName} (${aWeight}%)`,
+            date: aDueDate,
+            description: `Assessment for ${selectedModule.name} (${selectedModule.code})\nType: ${aType}\nWeight: ${aWeight}%`,
+            reminderDays: [7, 3, 1],
+          });
+          if (eventId) {
+            await supabase.from("assessments").update({ google_event_id: eventId }).eq("id", assessment.id);
+            assessment.google_event_id = eventId;
+          }
+        }
+      } catch {
+        // Silently skip calendar sync errors
+      }
+    }
+
+    setAssessments([...assessments, assessment]);
     setShowAddAssessment(false);
     setAName("");
     setAType("assignment");

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -11,8 +11,9 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { Save, MessageSquare, Bell, Shield } from 'lucide-react';
+import { Save, MessageSquare, Bell, Shield, Calendar, Mail, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
 import { CAREER_FIELDS, YEAR_OPTIONS, SESSION_TYPES } from '@/types/database';
+import { useSearchParams } from 'react-router-dom';
 
 export default function Settings() {
   const { profile, user, refreshProfile, signOut } = useAuth();
@@ -39,6 +40,77 @@ export default function Settings() {
   const [whatsappEnabled, setWhatsappEnabled] = useState(profile?.whatsapp_enabled || false);
 
   const [saving, setSaving] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Google integration state
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleTokenCreatedAt, setGoogleTokenCreatedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check google connection status
+    const checkGoogle = async () => {
+      const { data } = await supabase.from('google_tokens').select('id, created_at').single();
+      if (data) {
+        setGoogleConnected(true);
+        setGoogleTokenCreatedAt(data.created_at);
+      }
+    };
+    checkGoogle();
+
+    // Handle callback
+    const googleParam = searchParams.get('google');
+    if (googleParam === 'connected') {
+      toast.success('Google account connected!');
+      setGoogleConnected(true);
+      searchParams.delete('google');
+      setSearchParams(searchParams, { replace: true });
+    } else if (googleParam === 'error') {
+      toast.error('Failed to connect Google account');
+      searchParams.delete('google');
+      searchParams.delete('reason');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []);
+
+  const connectGoogle = async () => {
+    setGoogleLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error('Please sign in first'); return; }
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth?action=auth`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error(data.error || 'Failed to start Google auth');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to connect');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const disconnectGoogle = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth?action=disconnect`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+      setGoogleConnected(false);
+      setGoogleTokenCreatedAt(null);
+      toast.success('Google account disconnected');
+    } catch {
+      toast.error('Failed to disconnect');
+    }
+  };
 
   const maskPhone = (num: string) => {
     if (!num || num.length < 8) return num;
@@ -163,7 +235,73 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* WhatsApp */}
+      {/* Google Integrations */}
+      <Card className="border-border shadow-sm">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Google Integrations</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-3 bg-accent/50 rounded-md text-xs text-muted-foreground flex items-start gap-2">
+            <ExternalLink className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            Connect Google to sync your timetable and receive email reminders about assessments.
+          </div>
+
+          {/* Google Calendar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              <div>
+                <p className="text-sm font-medium">Google Calendar</p>
+                <div className="flex items-center gap-1.5">
+                  {googleConnected ? (
+                    <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
+                  ) : (
+                    <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+                  )}
+                </div>
+                {googleConnected && googleTokenCreatedAt && (
+                  <p className="text-[10px] text-muted-foreground">Connected {new Date(googleTokenCreatedAt).toLocaleDateString()}</p>
+                )}
+              </div>
+            </div>
+            {googleConnected ? (
+              <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
+            ) : (
+              <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
+                {googleLoading ? 'Connecting...' : 'Connect'}
+              </Button>
+            )}
+          </div>
+
+          {/* Gmail */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mail className="h-4 w-4" />
+              <div>
+                <p className="text-sm font-medium">Gmail</p>
+                <div className="flex items-center gap-1.5">
+                  {googleConnected ? (
+                    <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
+                  ) : (
+                    <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+                  )}
+                </div>
+              </div>
+            </div>
+            {googleConnected ? (
+              <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
+            ) : (
+              <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
+                {googleLoading ? 'Connecting...' : 'Connect'}
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
