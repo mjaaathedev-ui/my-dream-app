@@ -12,7 +12,6 @@ import { toast } from 'sonner';
 import { Plus, Calendar, Trash2, RefreshCw } from 'lucide-react';
 import type { Module, TimetableEntry } from '@/types/database';
 import { syncTimetableEntry, isGoogleConnected } from '@/lib/google-calendar';
-import type { Module, TimetableEntry } from '@/types/database';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const HOURS = Array.from({ length: 16 }, (_, i) => i + 7); // 7-22
