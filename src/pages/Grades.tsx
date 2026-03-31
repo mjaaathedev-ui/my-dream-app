@@ -46,6 +46,7 @@ import {
 import type { Module, Assessment } from "@/types/database";
 import { ASSESSMENT_TYPES, MODULE_COLORS } from "@/types/database";
 import TranscriptUpload from "@/components/TranscriptUpload";
+import { createCalendarEvent, isGoogleConnected } from "@/lib/google-calendar";
 
 export default function Grades() {
   const { user, profile } = useAuth();
