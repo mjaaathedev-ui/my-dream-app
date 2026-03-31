@@ -56,6 +56,7 @@ export type Database = {
         Row: {
           created_at: string
           due_date: string | null
+          google_event_id: string | null
           id: string
           mark_achieved: number | null
           max_mark: number | null
@@ -70,6 +71,7 @@ export type Database = {
         Insert: {
           created_at?: string
           due_date?: string | null
+          google_event_id?: string | null
           id?: string
           mark_achieved?: number | null
           max_mark?: number | null
@@ -84,6 +86,7 @@ export type Database = {
         Update: {
           created_at?: string
           due_date?: string | null
+          google_event_id?: string | null
           id?: string
           mark_achieved?: number | null
           max_mark?: number | null
@@ -193,6 +196,33 @@ export type Database = {
           target_value?: number | null
           title?: string
           type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      google_tokens: {
+        Row: {
+          access_token: string
+          created_at: string
+          expires_at: string
+          id: string
+          refresh_token: string
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          refresh_token: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          refresh_token?: string
           user_id?: string
         }
         Relationships: []
