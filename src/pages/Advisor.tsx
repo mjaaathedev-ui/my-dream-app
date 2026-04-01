@@ -326,16 +326,18 @@ export default function Advisor() {
           const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantSoFar }];
           if (conversationId) {
             await supabase.from('ai_conversations').update({ messages: finalMessages as any }).eq('id', conversationId);
-          } else if (selectedModuleId) {
+          } else {
             const { data: conv } = await supabase.from('ai_conversations').insert({
-              user_id: user.id, module_id: selectedModuleId, messages: finalMessages as any,
+              user_id: user.id, module_id: selectedModuleId || null, messages: finalMessages as any,
             }).select().single();
             if (conv) setConversationId((conv as AIConversation).id);
           }
         },
         onToolResults: (results) => {
-          // Tool actions were performed — could refresh data
           console.log('Tool results:', results);
+          // Refresh modules list after tool actions
+          supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false)
+            .then(({ data }) => { if (data) setModules(data as Module[]); });
         },
       });
     } catch (err: any) {
