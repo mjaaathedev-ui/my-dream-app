@@ -374,7 +374,7 @@ export default function Advisor() {
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Context</h2>
         <div className="space-y-2">
           <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
-            <SelectTrigger><SelectValue placeholder="Select module" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="All modules (general)" /></SelectTrigger>
             <SelectContent>
               {modules.map(m => (
                 <SelectItem key={m.id} value={m.id}>
@@ -388,40 +388,42 @@ export default function Advisor() {
           </Select>
         </div>
 
-        {selectedModuleId && (
-          <>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-medium text-muted-foreground">Files ({files.length})</h3>
-                <label className="cursor-pointer">
-                  <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
-                    onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
-                  <div className="flex items-center gap-1 text-xs text-primary hover:underline">
-                    <Upload className="h-3 w-3" /> Upload
-                  </div>
-                </label>
+        {/* Upload section - always visible */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-medium text-muted-foreground">
+              Upload Documents
+            </h3>
+            <label className="cursor-pointer">
+              <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
+                onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
+              <div className="flex items-center gap-1 text-xs text-primary hover:underline">
+                <Upload className="h-3 w-3" /> Upload
               </div>
-              {uploading && (
-                <div className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Processing...
-                </div>
-              )}
-              {files.map(f => (
-                <div key={f.id} className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
-                  <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <span className="truncate">{f.file_name}</span>
-                </div>
-              ))}
+            </label>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Drop course outlines, transcripts, study guides, or any PDF. AI will auto-extract assessments, dates & weights.
+          </p>
+          {uploading && (
+            <div className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
+              <Loader2 className="h-3 w-3 animate-spin" /> Analyzing document...
             </div>
+          )}
+          {files.length > 0 && files.map(f => (
+            <div key={f.id} className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
+              <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+              <span className="truncate">{f.file_name}</span>
+            </div>
+          ))}
+        </div>
 
-            <div className="space-y-1 p-3 bg-surface-elevated rounded-md text-xs">
-              <p className="font-medium text-muted-foreground">Always in context:</p>
-              <p>Goal: {profile?.career_goal || 'Not set'}</p>
-              <p>Target: {profile?.target_average}%</p>
-              <p>Module files & notes included</p>
-            </div>
-          </>
-        )}
+        <div className="space-y-1 p-3 bg-accent/50 rounded-md text-xs">
+          <p className="font-medium text-muted-foreground">Always in context:</p>
+          <p>Goal: {profile?.career_goal || 'Not set'}</p>
+          <p>Target: {profile?.target_average}%</p>
+          <p>{selectedModuleId ? 'Module files & notes included' : 'All modules & data included'}</p>
+        </div>
 
         {messages.length > 0 && (
           <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" onClick={clearConversation}>
