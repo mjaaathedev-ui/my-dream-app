@@ -437,16 +437,15 @@ export default function Advisor() {
         {/* Mobile module selector */}
         <div className="lg:hidden p-3 border-b border-border flex gap-2">
           <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
-            <SelectTrigger className="flex-1"><SelectValue placeholder="Select module" /></SelectTrigger>
+            <SelectTrigger className="flex-1"><SelectValue placeholder="All modules" /></SelectTrigger>
             <SelectContent>
               {modules.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
             </SelectContent>
           </Select>
           <label className="cursor-pointer">
             <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
-              onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }}
-              disabled={!selectedModuleId} />
-            <Button variant="outline" size="icon" disabled={!selectedModuleId}><Upload className="h-4 w-4" /></Button>
+              onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
+            <Button variant="outline" size="icon"><Upload className="h-4 w-4" /></Button>
           </label>
         </div>
 
