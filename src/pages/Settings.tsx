@@ -46,6 +46,8 @@ export default function Settings() {
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleTokenCreatedAt, setGoogleTokenCreatedAt] = useState<string | null>(null);
+  const [calendars, setCalendars] = useState<{ id: string; summary: string; primary: boolean; backgroundColor: string }[]>([]);
+  const [selectedCalendarId, setSelectedCalendarId] = useState(profile?.google_calendar_id || '');
 
   useEffect(() => {
     // Check google connection status
