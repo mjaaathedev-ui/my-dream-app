@@ -46,23 +46,26 @@ export default function Settings() {
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleTokenCreatedAt, setGoogleTokenCreatedAt] = useState<string | null>(null);
+  const [calendars, setCalendars] = useState<{ id: string; summary: string; primary: boolean; backgroundColor: string }[]>([]);
+  const [selectedCalendarId, setSelectedCalendarId] = useState(profile?.google_calendar_id || '');
 
   useEffect(() => {
-    // Check google connection status
     const checkGoogle = async () => {
       const { data } = await supabase.from('google_tokens').select('id, created_at').single();
       if (data) {
         setGoogleConnected(true);
         setGoogleTokenCreatedAt(data.created_at);
+        // Fetch calendar list
+        fetchCalendars();
       }
     };
     checkGoogle();
 
-    // Handle callback
     const googleParam = searchParams.get('google');
     if (googleParam === 'connected') {
       toast.success('Google account connected!');
       setGoogleConnected(true);
+      fetchCalendars();
       searchParams.delete('google');
       setSearchParams(searchParams, { replace: true });
     } else if (googleParam === 'error') {
@@ -72,6 +75,28 @@ export default function Settings() {
       setSearchParams(searchParams, { replace: true });
     }
   }, []);
+
+  const fetchCalendars = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth?action=calendars`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setCalendars(data.calendars || []);
+        // Auto-select primary if none selected
+        if (!selectedCalendarId && data.calendars?.length > 0) {
+          const primary = data.calendars.find((c: any) => c.primary);
+          if (primary) setSelectedCalendarId(primary.id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch calendars:', e);
+    }
+  };
 
   const connectGoogle = async () => {
     setGoogleLoading(true);
@@ -133,6 +158,7 @@ export default function Settings() {
       timezone,
       whatsapp_number: whatsappNumber,
       whatsapp_enabled: whatsappEnabled,
+      google_calendar_id: selectedCalendarId,
     }).eq('user_id', user.id);
     if (error) toast.error(error.message);
     else { toast.success('Settings saved'); await refreshProfile(); }
@@ -250,29 +276,53 @@ export default function Settings() {
           </div>
 
           {/* Google Calendar */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
-              <div>
-                <p className="text-sm font-medium">Google Calendar</p>
-                <div className="flex items-center gap-1.5">
-                  {googleConnected ? (
-                    <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
-                  ) : (
-                    <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4" />
+                <div>
+                  <p className="text-sm font-medium">Google Calendar</p>
+                  <div className="flex items-center gap-1.5">
+                    {googleConnected ? (
+                      <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
+                    ) : (
+                      <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+                    )}
+                  </div>
+                  {googleConnected && googleTokenCreatedAt && (
+                    <p className="text-[10px] text-muted-foreground">Connected {new Date(googleTokenCreatedAt).toLocaleDateString()}</p>
                   )}
                 </div>
-                {googleConnected && googleTokenCreatedAt && (
-                  <p className="text-[10px] text-muted-foreground">Connected {new Date(googleTokenCreatedAt).toLocaleDateString()}</p>
-                )}
               </div>
+              {googleConnected ? (
+                <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
+              ) : (
+                <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
+                  {googleLoading ? 'Connecting...' : 'Connect'}
+                </Button>
+              )}
             </div>
-            {googleConnected ? (
-              <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
-            ) : (
-              <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
-                {googleLoading ? 'Connecting...' : 'Connect'}
-              </Button>
+
+            {/* Calendar picker */}
+            {googleConnected && calendars.length > 0 && (
+              <div className="space-y-2 pl-6">
+                <Label className="text-xs">Sync events to:</Label>
+                <Select value={selectedCalendarId} onValueChange={setSelectedCalendarId}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Choose a calendar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {calendars.map(cal => (
+                      <SelectItem key={cal.id} value={cal.id}>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: cal.backgroundColor }} />
+                          {cal.summary} {cal.primary ? '(Primary)' : ''}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
           </div>
 

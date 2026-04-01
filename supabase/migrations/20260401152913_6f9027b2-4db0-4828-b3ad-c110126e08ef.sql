@@ -1,0 +1,1 @@
+ALTER TABLE public.users_profile ADD COLUMN IF NOT EXISTS google_calendar_id text DEFAULT '';

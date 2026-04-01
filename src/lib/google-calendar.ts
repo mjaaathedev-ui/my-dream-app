@@ -4,20 +4,15 @@ const FUNCTIONS_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
 interface CalendarEvent {
   title: string;
-  date: string; // ISO date string
+  date: string;
   description?: string;
   reminderDays?: number[];
 }
 
-/**
- * Get a valid Google access token, refreshing if expired.
- * Returns null if user has no Google connection.
- */
 async function getAccessToken(): Promise<string | null> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
 
-  // Check if we have tokens and if they're expired
   const { data: tokenRow } = await supabase
     .from('google_tokens')
     .select('*')
@@ -25,7 +20,6 @@ async function getAccessToken(): Promise<string | null> {
 
   if (!tokenRow) return null;
 
-  // If token expires within 5 minutes, refresh it
   const expiresAt = new Date(tokenRow.expires_at).getTime();
   if (Date.now() > expiresAt - 5 * 60 * 1000) {
     const res = await fetch(`${FUNCTIONS_BASE}/google-oauth?action=refresh`, {
@@ -39,26 +33,36 @@ async function getAccessToken(): Promise<string | null> {
   return tokenRow.access_token;
 }
 
-/**
- * Check if user has connected Google
- */
-export async function isGoogleConnected(): Promise<boolean> {
-  const { data } = await supabase
-    .from('google_tokens')
-    .select('id')
+async function getCalendarId(): Promise<string> {
+  const { data: profile } = await supabase
+    .from('users_profile')
+    .select('google_calendar_id')
     .single();
+  return (profile as any)?.google_calendar_id || 'primary';
+}
+
+export async function isGoogleConnected(): Promise<boolean> {
+  const { data } = await supabase.from('google_tokens').select('id').single();
   return !!data;
 }
 
-/**
- * Create a Google Calendar event
- */
-export async function createCalendarEvent(
-  event: CalendarEvent
-): Promise<string | null> {
+export async function fetchCalendarList(): Promise<{ id: string; summary: string; primary: boolean; backgroundColor: string }[]> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return [];
+
+  const res = await fetch(`${FUNCTIONS_BASE}/google-oauth?action=calendars`, {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.calendars || [];
+}
+
+export async function createCalendarEvent(event: CalendarEvent): Promise<string | null> {
   const accessToken = await getAccessToken();
   if (!accessToken) return null;
 
+  const calendarId = await getCalendarId();
   const eventDate = new Date(event.date);
 
   const reminders = event.reminderDays?.map(days => ({
@@ -85,7 +89,7 @@ export async function createCalendarEvent(
 
   try {
     const res = await fetch(
-      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
       {
         method: 'POST',
         headers: {
@@ -109,16 +113,15 @@ export async function createCalendarEvent(
   }
 }
 
-/**
- * Delete a Google Calendar event
- */
 export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
   const accessToken = await getAccessToken();
   if (!accessToken) return false;
 
+  const calendarId = await getCalendarId();
+
   try {
     const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
       {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -130,9 +133,6 @@ export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
   }
 }
 
-/**
- * Sync a timetable entry as a recurring Google Calendar event
- */
 export async function syncTimetableEntry(entry: {
   title: string;
   day_of_week: number;
@@ -145,10 +145,10 @@ export async function syncTimetableEntry(entry: {
   const accessToken = await getAccessToken();
   if (!accessToken) return null;
 
-  // Calculate the next occurrence of this day
+  const calendarId = await getCalendarId();
+
   const now = new Date();
   const currentDay = now.getDay();
-  // Convert our day_of_week (0=Mon) to JS day (0=Sun)
   const targetJsDay = (entry.day_of_week + 1) % 7;
   let daysUntil = targetJsDay - currentDay;
   if (daysUntil <= 0) daysUntil += 7;
@@ -180,7 +180,7 @@ export async function syncTimetableEntry(entry: {
 
   try {
     const res = await fetch(
-      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
       {
         method: 'POST',
         headers: {

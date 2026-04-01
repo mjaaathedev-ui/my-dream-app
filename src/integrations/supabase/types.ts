@@ -542,6 +542,7 @@ export type Database = {
           email_reminders_enabled: boolean | null
           full_name: string
           funding_condition: string | null
+          google_calendar_id: string | null
           has_funding_condition: boolean | null
           id: string
           institution: string | null
@@ -569,6 +570,7 @@ export type Database = {
           email_reminders_enabled?: boolean | null
           full_name?: string
           funding_condition?: string | null
+          google_calendar_id?: string | null
           has_funding_condition?: boolean | null
           id?: string
           institution?: string | null
@@ -596,6 +598,7 @@ export type Database = {
           email_reminders_enabled?: boolean | null
           full_name?: string
           funding_condition?: string | null
+          google_calendar_id?: string | null
           has_funding_condition?: boolean | null
           id?: string
           institution?: string | null
