@@ -50,21 +50,22 @@ export default function Settings() {
   const [selectedCalendarId, setSelectedCalendarId] = useState(profile?.google_calendar_id || '');
 
   useEffect(() => {
-    // Check google connection status
     const checkGoogle = async () => {
       const { data } = await supabase.from('google_tokens').select('id, created_at').single();
       if (data) {
         setGoogleConnected(true);
         setGoogleTokenCreatedAt(data.created_at);
+        // Fetch calendar list
+        fetchCalendars();
       }
     };
     checkGoogle();
 
-    // Handle callback
     const googleParam = searchParams.get('google');
     if (googleParam === 'connected') {
       toast.success('Google account connected!');
       setGoogleConnected(true);
+      fetchCalendars();
       searchParams.delete('google');
       setSearchParams(searchParams, { replace: true });
     } else if (googleParam === 'error') {
@@ -74,6 +75,28 @@ export default function Settings() {
       setSearchParams(searchParams, { replace: true });
     }
   }, []);
+
+  const fetchCalendars = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth?action=calendars`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setCalendars(data.calendars || []);
+        // Auto-select primary if none selected
+        if (!selectedCalendarId && data.calendars?.length > 0) {
+          const primary = data.calendars.find((c: any) => c.primary);
+          if (primary) setSelectedCalendarId(primary.id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch calendars:', e);
+    }
+  };
 
   const connectGoogle = async () => {
     setGoogleLoading(true);
