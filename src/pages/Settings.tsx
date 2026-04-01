@@ -276,29 +276,53 @@ export default function Settings() {
           </div>
 
           {/* Google Calendar */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
-              <div>
-                <p className="text-sm font-medium">Google Calendar</p>
-                <div className="flex items-center gap-1.5">
-                  {googleConnected ? (
-                    <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
-                  ) : (
-                    <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4" />
+                <div>
+                  <p className="text-sm font-medium">Google Calendar</p>
+                  <div className="flex items-center gap-1.5">
+                    {googleConnected ? (
+                      <><CheckCircle className="h-3 w-3 text-green-500" /><span className="text-xs text-green-600">Connected</span></>
+                    ) : (
+                      <><XCircle className="h-3 w-3 text-muted-foreground" /><span className="text-xs text-muted-foreground">Not connected</span></>
+                    )}
+                  </div>
+                  {googleConnected && googleTokenCreatedAt && (
+                    <p className="text-[10px] text-muted-foreground">Connected {new Date(googleTokenCreatedAt).toLocaleDateString()}</p>
                   )}
                 </div>
-                {googleConnected && googleTokenCreatedAt && (
-                  <p className="text-[10px] text-muted-foreground">Connected {new Date(googleTokenCreatedAt).toLocaleDateString()}</p>
-                )}
               </div>
+              {googleConnected ? (
+                <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
+              ) : (
+                <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
+                  {googleLoading ? 'Connecting...' : 'Connect'}
+                </Button>
+              )}
             </div>
-            {googleConnected ? (
-              <Button variant="outline" size="sm" onClick={disconnectGoogle}>Disconnect</Button>
-            ) : (
-              <Button size="sm" onClick={connectGoogle} disabled={googleLoading}>
-                {googleLoading ? 'Connecting...' : 'Connect'}
-              </Button>
+
+            {/* Calendar picker */}
+            {googleConnected && calendars.length > 0 && (
+              <div className="space-y-2 pl-6">
+                <Label className="text-xs">Sync events to:</Label>
+                <Select value={selectedCalendarId} onValueChange={setSelectedCalendarId}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Choose a calendar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {calendars.map(cal => (
+                      <SelectItem key={cal.id} value={cal.id}>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: cal.backgroundColor }} />
+                          {cal.summary} {cal.primary ? '(Primary)' : ''}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
           </div>
 
