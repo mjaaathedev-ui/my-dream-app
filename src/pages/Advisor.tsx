@@ -162,13 +162,14 @@ export default function Advisor() {
 
   const selectedModule = modules.find(m => m.id === selectedModuleId);
 
-  // File upload
+  // File upload - works with or without module selected
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (!user || !selectedModuleId) return;
+    if (!user) return;
     setUploading(true);
 
     for (const file of acceptedFiles) {
-      const filePath = `${user.id}/${selectedModuleId}/${Date.now()}_${file.name}`;
+      const folder = selectedModuleId || 'general';
+      const filePath = `${user.id}/${folder}/${Date.now()}_${file.name}`;
       
       // Upload to storage
       const { error: uploadError } = await supabase.storage
@@ -183,7 +184,7 @@ export default function Advisor() {
       // Save file record
       const { data: fileRecord, error: dbError } = await supabase.from('uploaded_files').insert({
         user_id: user.id,
-        module_id: selectedModuleId,
+        module_id: selectedModuleId || null,
         file_name: file.name,
         file_path: filePath,
         file_type: file.type,
@@ -195,8 +196,10 @@ export default function Advisor() {
         continue;
       }
 
-      setFiles(prev => [...prev, fileRecord as UploadedFile]);
-      toast.success(`${file.name} uploaded`);
+      if (selectedModuleId) {
+        setFiles(prev => [...prev, fileRecord as UploadedFile]);
+      }
+      toast.success(`${file.name} uploaded — analyzing...`);
 
       // Extract text via edge function
       try {
@@ -217,20 +220,49 @@ export default function Advisor() {
               .eq('id', (fileRecord as UploadedFile).id);
           }
 
-          // Show analysis in chat
-          if (extractData.analysis) {
-            const a = extractData.analysis;
-            let analysisMsg = `📄 **Analyzed: ${file.name}**\n\n`;
-            if (a.key_concepts) {
-              analysisMsg += `**Key Concepts:**\n${a.key_concepts.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}\n\n`;
+          const analysis = extractData.analysis;
+          const docType = analysis?.document_type || 'other';
+
+          // Build a smart message for the AI based on document analysis
+          let aiPrompt = `I just uploaded "${file.name}"`;
+          
+          if (docType === 'course_outline' || docType === 'study_guide') {
+            aiPrompt += ` which is a ${docType.replace('_', ' ')}. `;
+            if (analysis?.modules_found?.length > 0) {
+              aiPrompt += `It contains info about: ${analysis.modules_found.map((m: any) => m.name).join(', ')}. `;
             }
-            if (a.study_approach) {
-              analysisMsg += `**Study Approach:** ${a.study_approach}\n\n`;
+            if (analysis?.assessments_found?.length > 0) {
+              aiPrompt += `I found ${analysis.assessments_found.length} assessments with dates and weightings. `;
             }
-            if (a.quiz_questions) {
-              analysisMsg += `**Quiz Questions:**\n${a.quiz_questions.map((q: any, i: number) => `${i + 1}. ${q.question}\n   *Answer: ${q.answer}*`).join('\n\n')}`;
+            aiPrompt += `Please automatically create the modules and ALL assessments from this document, including dates and weights. Also add them to my Google Calendar if connected.`;
+            
+            // Add the extracted content as context
+            aiPrompt += `\n\nDocument content:\n${extractData.extracted_text?.substring(0, 40000) || ''}`;
+          } else if (docType === 'transcript') {
+            aiPrompt += ` which is my academic transcript. Please extract all modules and marks, and create/update them in my system.`;
+            aiPrompt += `\n\nTranscript content:\n${extractData.extracted_text?.substring(0, 40000) || ''}`;
+          } else {
+            // Study material - show analysis in chat
+            let analysisMsg = `📄 **Analyzed: ${file.name}** (${docType.replace('_', ' ')})\n\n`;
+            if (analysis?.key_concepts?.length > 0) {
+              analysisMsg += `**Key Concepts:**\n${analysis.key_concepts.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}\n\n`;
+            }
+            if (analysis?.study_approach) {
+              analysisMsg += `**Study Approach:** ${analysis.study_approach}\n\n`;
+            }
+            if (analysis?.assessments_found?.length > 0) {
+              analysisMsg += `**Assessments Found:**\n${analysis.assessments_found.map((a: any) => `- ${a.name} (${a.type}, ${a.weight_percent}%)${a.due_date ? ` — Due: ${a.due_date}` : ''}`).join('\n')}\n\n`;
+            }
+            if (analysis?.quiz_questions?.length > 0) {
+              analysisMsg += `**Quiz Questions:**\n${analysis.quiz_questions.map((q: any, i: number) => `${i + 1}. ${q.question}\n   *Answer: ${q.answer}*`).join('\n\n')}`;
             }
             setMessages(prev => [...prev, { role: 'assistant', content: analysisMsg }]);
+            aiPrompt = ''; // Don't send to AI for study materials
+          }
+
+          // Send structured documents to AI for automated processing
+          if (aiPrompt) {
+            await sendMessage(aiPrompt);
           }
         }
       } catch (e) {
