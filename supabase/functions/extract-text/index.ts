@@ -11,7 +11,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { file_path, file_name, file_type, module_name } = await req.json();
+    const { file_path, file_name, file_type, module_name, mode } = await req.json();
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
@@ -57,7 +57,7 @@ serve(async (req) => {
             {
               role: "user",
               content: [
-                { type: "text", text: "Extract ALL text from this image. If it's a document, transcript, or study material, preserve the structure. Return only the extracted text, no commentary." },
+                { type: "text", text: "Extract ALL text from this image. If it's a document, transcript, or study material, preserve the structure including dates, weights, percentages, and any tabular data. Return only the extracted text, no commentary." },
                 { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
               ],
             },
@@ -70,14 +70,16 @@ serve(async (req) => {
         extractedText = visionData.choices?.[0]?.message?.content || "";
       }
     } else {
-      // For text-based files, read as text
       extractedText = await fileData.text();
     }
 
-    // Now analyze the content with AI
+    // Detect document type and do smart analysis
     let analysis = null;
+    let structured_data = null;
+
     if (extractedText.length > 50) {
-      const analysisResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      // First, detect document type
+      const detectResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
@@ -88,21 +90,78 @@ serve(async (req) => {
           messages: [
             {
               role: "system",
-              content: "You analyze academic study materials. Return JSON only.",
+              content: "You classify academic documents. Return JSON only.",
             },
             {
               role: "user",
-              content: `This is study material${module_name ? ` for ${module_name}` : ""}. Analyze it and return JSON with: {"key_concepts": ["concept1", ...], "study_approach": "suggested approach", "quiz_questions": [{"question": "...", "answer": "..."}]}. Include exactly 5 key concepts and 5 quiz questions.\n\nMaterial:\n${extractedText.substring(0, 30000)}`,
+              content: `Classify this document and extract structured academic data. Return JSON with this structure:
+{
+  "document_type": "transcript" | "course_outline" | "study_guide" | "lecture_notes" | "past_paper" | "assignment" | "other",
+  "confidence": 0.0-1.0,
+  "modules_found": [
+    {
+      "name": "Module Full Name",
+      "code": "MOD101",
+      "credit_weight": 16,
+      "semester": "Semester 1 2024"
+    }
+  ],
+  "assessments_found": [
+    {
+      "name": "Test 1",
+      "type": "test|assignment|exam|practical|project",
+      "weight_percent": 40,
+      "due_date": "2026-04-15 or null if not found",
+      "mark_achieved": null,
+      "max_mark": 100,
+      "module_name": "Which module this belongs to"
+    }
+  ],
+  "key_dates": [
+    {
+      "date": "2026-04-15",
+      "description": "Test 1 - Module Name",
+      "type": "assessment|lecture|exam|deadline"
+    }
+  ],
+  "key_concepts": ["concept1", "concept2"],
+  "study_approach": "Suggested approach for this material",
+  "quiz_questions": [{"question": "...", "answer": "..."}]
+}
+
+Rules:
+- Extract EVERY assessment, test, exam, assignment with dates and weights if visible
+- For course outlines, extract the full assessment schedule with due dates and weightings
+- For transcripts, extract marks achieved
+- For study guides/notes, focus on key concepts and quiz questions
+- If weight is not shown, estimate from context
+- Dates should be in YYYY-MM-DD format
+- Always include quiz_questions (at least 3-5)
+
+Document text:
+${extractedText.substring(0, 50000)}`,
             },
           ],
           response_format: { type: "json_object" },
         }),
       });
 
-      if (analysisResponse.ok) {
-        const analysisData = await analysisResponse.json();
+      if (detectResponse.ok) {
+        const detectData = await detectResponse.json();
         try {
-          analysis = JSON.parse(analysisData.choices?.[0]?.message?.content || "null");
+          const parsed = JSON.parse(detectData.choices?.[0]?.message?.content || "null");
+          if (parsed) {
+            structured_data = parsed;
+            analysis = {
+              document_type: parsed.document_type,
+              key_concepts: parsed.key_concepts || [],
+              study_approach: parsed.study_approach || "",
+              quiz_questions: parsed.quiz_questions || [],
+              modules_found: parsed.modules_found || [],
+              assessments_found: parsed.assessments_found || [],
+              key_dates: parsed.key_dates || [],
+            };
+          }
         } catch {
           analysis = null;
         }
@@ -110,7 +169,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ extracted_text: extractedText, analysis }),
+      JSON.stringify({ extracted_text: extractedText, analysis, structured_data }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (e) {
