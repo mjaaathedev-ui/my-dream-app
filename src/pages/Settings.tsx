@@ -158,6 +158,7 @@ export default function Settings() {
       timezone,
       whatsapp_number: whatsappNumber,
       whatsapp_enabled: whatsappEnabled,
+      google_calendar_id: selectedCalendarId,
     }).eq('user_id', user.id);
     if (error) toast.error(error.message);
     else { toast.success('Settings saved'); await refreshProfile(); }
