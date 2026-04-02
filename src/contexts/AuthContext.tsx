@@ -106,7 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (
           event === 'SIGNED_IN' ||
           event === 'INITIAL_SESSION' ||
-          event === 'TOKEN_REFRESHED' ||
           event === 'USER_UPDATED'
         ) {
           if (session?.user) {
@@ -115,11 +114,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             fetchingProfile.current = false;
             await fetchProfile(session.user.id);
           } else {
-            // INITIAL_SESSION with no user = definitely logged out
             setProfile(null);
           }
           setLoading(false);
           return;
+        }
+
+        // TOKEN_REFRESHED: only update session/user, skip re-fetching profile
+        if (event === 'TOKEN_REFRESHED' && session?.user) {
+          setSession(session);
+          setUser(session.user);
+          setLoading(false);
         }
       }
     );
