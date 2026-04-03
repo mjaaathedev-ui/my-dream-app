@@ -72,7 +72,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter basename="/my-dream-app">
         <AuthProvider>
           <Suspense fallback={<LoadingScreen />}>
             <Routes>
