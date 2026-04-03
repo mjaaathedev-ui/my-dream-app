@@ -30,6 +30,7 @@ interface Assessment {
   user_id: string;
   submitted: boolean;
   created_at: string;
+  date?: string | null;
 }
 
 interface GradeData {
@@ -66,6 +67,7 @@ export default function Grades() {
   const [formData, setFormData] = useState({
     name: '',
     type: 'exam',
+    date: '',
     mark_achieved: '',
     max_mark: '100',
     weight_percent: '',
@@ -204,13 +206,24 @@ export default function Grades() {
       const maxMark = parseInt(formData.max_mark);
       const weightPercent = parseInt(formData.weight_percent);
 
-      if (markValue !== null && markValue > maxMark) {
-        toast.error('Mark achieved cannot exceed max mark');
+      if (maxMark <= 0) {
+        toast.error('Max mark must be greater than 0');
         return;
       }
 
-      if (weightPercent > 100) {
-        toast.error('Weight cannot exceed 100%');
+      if (markValue !== null) {
+        if (markValue < 0) {
+          toast.error('Mark achieved cannot be negative');
+          return;
+        }
+        if (markValue > maxMark) {
+          toast.error(`Mark achieved cannot exceed 100% of the max mark (${maxMark})`);
+          return;
+        }
+      }
+
+      if (weightPercent > 100 || weightPercent < 0) {
+        toast.error('Weight must be between 0 and 100%');
         return;
       }
 
@@ -220,6 +233,7 @@ export default function Grades() {
           .update({
             name: formData.name,
             type: formData.type,
+            date: formData.date || null,
             mark_achieved: markValue,
             max_mark: maxMark,
             weight_percent: weightPercent,
@@ -236,6 +250,7 @@ export default function Grades() {
             user_id: user?.id,
             name: formData.name,
             type: formData.type,
+            date: formData.date || null,
             mark_achieved: markValue,
             max_mark: maxMark,
             weight_percent: weightPercent,
@@ -279,6 +294,7 @@ export default function Grades() {
     setFormData({
       name: '',
       type: 'exam',
+      date: '',
       mark_achieved: '',
       max_mark: '100',
       weight_percent: '',
@@ -292,6 +308,7 @@ export default function Grades() {
     setFormData({
       name: assessment.name,
       type: assessment.type,
+      date: assessment.date || '',
       mark_achieved: assessment.mark_achieved?.toString() || '',
       max_mark: assessment.max_mark.toString(),
       weight_percent: assessment.weight_percent.toString(),
@@ -575,20 +592,30 @@ export default function Grades() {
                   />
                 </div>
                 
-                <div>
-                  <label className="text-sm font-medium">Type</label>
-                  <Select value={formData.type} onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="exam">Exam</SelectItem>
-                      <SelectItem value="assignment">Assignment</SelectItem>
-                      <SelectItem value="test">Test</SelectItem>
-                      <SelectItem value="project">Project</SelectItem>
-                      <SelectItem value="practical">Practical</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Type</label>
+                    <Select value={formData.type} onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="exam">Exam</SelectItem>
+                        <SelectItem value="assignment">Assignment</SelectItem>
+                        <SelectItem value="test">Test</SelectItem>
+                        <SelectItem value="project">Project</SelectItem>
+                        <SelectItem value="practical">Practical</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Date <span className="text-muted-foreground font-normal">(optional)</span></label>
+                    <Input 
+                      type="date" 
+                      value={formData.date} 
+                      onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))} 
+                    />
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
@@ -600,6 +627,7 @@ export default function Grades() {
                       onChange={(e) => setFormData(prev => ({ ...prev, mark_achieved: e.target.value }))} 
                       placeholder="0"
                       min="0"
+                      max={formData.max_mark}
                     />
                   </div>
                   <div>
@@ -884,7 +912,12 @@ export default function Grades() {
                                       {assessment.type}
                                     </span>
                                     <span className="text-xs text-muted-foreground">Weight: {assessment.weight_percent}%</span>
-                                    <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-0.5 rounded">
+                                    {assessment.date && (
+                                      <span className="text-xs text-muted-foreground">
+                                        • Date: {new Date(assessment.date).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-0.5 rounded ml-auto">
                                       Submitted
                                     </span>
                                   </div>
@@ -943,7 +976,12 @@ export default function Grades() {
                                     {assessment.type}
                                   </span>
                                   <span className="text-xs text-muted-foreground">Weight: {assessment.weight_percent}%</span>
-                                  <span className="text-xs font-medium text-amber-600 bg-amber-200 px-2 py-0.5 rounded">
+                                  {assessment.date && (
+                                    <span className="text-xs text-muted-foreground">
+                                      • Date: {new Date(assessment.date).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                  <span className="text-xs font-medium text-amber-600 bg-amber-200 px-2 py-0.5 rounded ml-auto">
                                     Not Graded
                                   </span>
                                 </div>
