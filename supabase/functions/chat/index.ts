@@ -608,11 +608,13 @@ When you perform an action, confirm what you did and offer next steps.`;
         );
       }
 
+      // Encode tool results as base64 to avoid ByteString issues with emojis
+      const encodedResults = btoa(unescape(encodeURIComponent(JSON.stringify(toolResults))));
       return new Response(secondResponse.body, {
         headers: {
           ...corsHeaders,
           "Content-Type": "text/event-stream",
-          "X-Tool-Results": JSON.stringify(toolResults),
+          "X-Tool-Results": encodedResults,
         },
       });
     }
