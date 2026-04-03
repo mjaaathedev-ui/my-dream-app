@@ -484,15 +484,21 @@ serve(async (req) => {
       hasGoogleCalendar = !!gToken;
     }
 
-    let systemPrompt = `You are StudyOS, an academic advisor and mentor built into a student's study management app. You are direct, honest, motivating without being sycophantic. You know this student's goals and hold them to it. Help them understand their material, prepare for assessments, and stay on track.
+    let systemPrompt = `You are StudyOS, an academic advisor and mentor built into a student's study management app. You are direct, honest, motivating without being sycophantic. You know this student's goals and hold them to it.
 
-You can take actions on behalf of the student using the tools provided. When a student mentions adding modules, assessments, study sessions, goals, or timetable entries, USE THE TOOLS to do it for them automatically. Don't just tell them how - actually do it.
+CRITICAL RULE: When a student asks you to add, create, log, or record ANYTHING (modules, assessments, marks, goals, timetable entries, study sessions), you MUST use the appropriate tool function. NEVER just say you did it — actually call the tool. If you don't call a tool, the data won't be saved.
 
-IMPORTANT CAPABILITIES:
-- When a student uploads a document (course outline, syllabus, transcript, study guide), analyze the content in the context and use bulk_create_from_document to automatically create modules and assessments with their dates and weightings.
-- When you create assessments with due dates${hasGoogleCalendar ? ', ALSO use create_calendar_events to add them to Google Calendar' : ''}.
-- Extract ALL assessment dates, weightings, and module info from uploaded documents.
-- If a course outline mentions tests, assignments, exams with dates and weights, create them ALL automatically.
+Available actions via tools:
+- add_module: Create a new module/course
+- add_assessment: Add a test, assignment, exam to a module
+- log_mark: Record a grade for an assessment
+- add_goal: Create a goal
+- add_timetable_entry: Add to weekly timetable
+- log_study_session: Log study time
+- bulk_create_from_document: Bulk create modules + assessments from uploaded documents
+- create_calendar_events: Add events to Google Calendar${hasGoogleCalendar ? ' (CONNECTED - use this when creating assessments with dates)' : ' (NOT connected)'}
+
+When a student uploads a document (course outline, syllabus, transcript), use bulk_create_from_document to automatically create ALL modules and assessments with dates and weightings.
 
 When you perform an action, confirm what you did and offer next steps.`;
 
@@ -551,6 +557,7 @@ When you perform an action, confirm what you did and offer next steps.`;
 
     const firstData = await firstResponse.json();
     const choice = firstData.choices?.[0];
+    console.log("AI finish_reason:", choice?.finish_reason, "has_tool_calls:", !!choice?.message?.tool_calls?.length);
 
     // Check for tool calls
     if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0 && userId) {
@@ -565,7 +572,9 @@ When you perform an action, confirm what you did and offer next steps.`;
         } catch {
           fnArgs = {};
         }
+        console.log("Executing tool:", fnName, "args:", JSON.stringify(fnArgs));
         const result = await executeTool(supabaseAdmin, userId, fnName, fnArgs, modules);
+        console.log("Tool result:", result);
         toolResults.push(result);
         toolMessages.push({
           role: "tool",
@@ -599,11 +608,13 @@ When you perform an action, confirm what you did and offer next steps.`;
         );
       }
 
+      // Encode tool results as base64 to avoid ByteString issues with emojis
+      const encodedResults = btoa(unescape(encodeURIComponent(JSON.stringify(toolResults))));
       return new Response(secondResponse.body, {
         headers: {
           ...corsHeaders,
           "Content-Type": "text/event-stream",
-          "X-Tool-Results": JSON.stringify(toolResults),
+          "X-Tool-Results": encodedResults,
         },
       });
     }
