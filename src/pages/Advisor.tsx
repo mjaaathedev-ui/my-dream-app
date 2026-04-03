@@ -262,7 +262,9 @@ export default function Advisor() {
 
           // Send structured documents to AI for automated processing
           if (aiPrompt) {
-            await sendMessage(aiPrompt);
+            setUploading(false);
+            await sendMessage(aiPrompt, true);
+            return; // Don't set uploading false again
           }
         }
       } catch (e) {
@@ -270,7 +272,7 @@ export default function Advisor() {
       }
     }
     setUploading(false);
-  }, [user, selectedModuleId, selectedModule]);
+  }, [user, selectedModuleId, selectedModule, messages, profile, conversationId]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
