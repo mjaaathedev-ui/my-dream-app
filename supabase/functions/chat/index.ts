@@ -557,6 +557,7 @@ When you perform an action, confirm what you did and offer next steps.`;
 
     const firstData = await firstResponse.json();
     const choice = firstData.choices?.[0];
+    console.log("AI finish_reason:", choice?.finish_reason, "has_tool_calls:", !!choice?.message?.tool_calls?.length);
 
     // Check for tool calls
     if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0 && userId) {
