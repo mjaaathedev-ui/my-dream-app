@@ -262,7 +262,9 @@ export default function Advisor() {
 
           // Send structured documents to AI for automated processing
           if (aiPrompt) {
-            await sendMessage(aiPrompt);
+            setUploading(false);
+            await sendMessage(aiPrompt, true);
+            return; // Don't set uploading false again
           }
         }
       } catch (e) {
@@ -270,7 +272,7 @@ export default function Advisor() {
       }
     }
     setUploading(false);
-  }, [user, selectedModuleId, selectedModule]);
+  }, [user, selectedModuleId, selectedModule, messages, profile, conversationId]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -284,8 +286,8 @@ export default function Advisor() {
     noKeyboard: true,
   });
 
-  const sendMessage = async (text: string) => {
-    if (!user || !text.trim() || loading) return;
+  const sendMessage = async (text: string, force = false) => {
+    if (!user || !text.trim() || (!force && loading)) return;
     const userMsg: Message = { role: 'user', content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
