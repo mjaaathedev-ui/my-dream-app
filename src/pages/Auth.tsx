@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { lovable } from '@/integrations/lovable';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -49,12 +49,13 @@ export default function Auth() {
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
     try {
-      const result = await lovable.auth.signInWithOAuth('google', {
-        redirect_uri: window.location.origin,
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`,
+        },
       });
-      if (result?.error) {
-        toast.error(result.error.message || 'Google sign-in failed');
-      }
+      if (error) toast.error(error.message || 'Google sign-in failed');
     } catch (err: any) {
       toast.error(err.message || 'Google sign-in failed');
     } finally {
