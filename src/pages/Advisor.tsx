@@ -55,11 +55,12 @@ async function streamChat({
     throw new Error(errorData.error || `Error ${resp.status}`);
   }
 
-  // Check for tool results header
+  // Check for tool results header (base64 encoded to avoid ByteString issues)
   const toolResultsHeader = resp.headers.get('X-Tool-Results');
   if (toolResultsHeader && onToolResults) {
     try {
-      onToolResults(JSON.parse(toolResultsHeader));
+      const decoded = decodeURIComponent(escape(atob(toolResultsHeader)));
+      onToolResults(JSON.parse(decoded));
     } catch {}
   }
 
@@ -162,13 +163,14 @@ export default function Advisor() {
 
   const selectedModule = modules.find(m => m.id === selectedModuleId);
 
-  // File upload
+  // File upload - works with or without module selected
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (!user || !selectedModuleId) return;
+    if (!user) return;
     setUploading(true);
 
     for (const file of acceptedFiles) {
-      const filePath = `${user.id}/${selectedModuleId}/${Date.now()}_${file.name}`;
+      const folder = selectedModuleId || 'general';
+      const filePath = `${user.id}/${folder}/${Date.now()}_${file.name}`;
       
       // Upload to storage
       const { error: uploadError } = await supabase.storage
@@ -183,7 +185,7 @@ export default function Advisor() {
       // Save file record
       const { data: fileRecord, error: dbError } = await supabase.from('uploaded_files').insert({
         user_id: user.id,
-        module_id: selectedModuleId,
+        module_id: selectedModuleId || null,
         file_name: file.name,
         file_path: filePath,
         file_type: file.type,
@@ -195,8 +197,10 @@ export default function Advisor() {
         continue;
       }
 
-      setFiles(prev => [...prev, fileRecord as UploadedFile]);
-      toast.success(`${file.name} uploaded`);
+      if (selectedModuleId) {
+        setFiles(prev => [...prev, fileRecord as UploadedFile]);
+      }
+      toast.success(`${file.name} uploaded — analyzing...`);
 
       // Extract text via edge function
       try {
@@ -217,20 +221,51 @@ export default function Advisor() {
               .eq('id', (fileRecord as UploadedFile).id);
           }
 
-          // Show analysis in chat
-          if (extractData.analysis) {
-            const a = extractData.analysis;
-            let analysisMsg = `📄 **Analyzed: ${file.name}**\n\n`;
-            if (a.key_concepts) {
-              analysisMsg += `**Key Concepts:**\n${a.key_concepts.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}\n\n`;
+          const analysis = extractData.analysis;
+          const docType = analysis?.document_type || 'other';
+
+          // Build a smart message for the AI based on document analysis
+          let aiPrompt = `I just uploaded "${file.name}"`;
+          
+          if (docType === 'course_outline' || docType === 'study_guide') {
+            aiPrompt += ` which is a ${docType.replace('_', ' ')}. `;
+            if (analysis?.modules_found?.length > 0) {
+              aiPrompt += `It contains info about: ${analysis.modules_found.map((m: any) => m.name).join(', ')}. `;
             }
-            if (a.study_approach) {
-              analysisMsg += `**Study Approach:** ${a.study_approach}\n\n`;
+            if (analysis?.assessments_found?.length > 0) {
+              aiPrompt += `I found ${analysis.assessments_found.length} assessments with dates and weightings. `;
             }
-            if (a.quiz_questions) {
-              analysisMsg += `**Quiz Questions:**\n${a.quiz_questions.map((q: any, i: number) => `${i + 1}. ${q.question}\n   *Answer: ${q.answer}*`).join('\n\n')}`;
+            aiPrompt += `Please automatically create the modules and ALL assessments from this document, including dates and weights. Also add them to my Google Calendar if connected.`;
+            
+            // Add the extracted content as context
+            aiPrompt += `\n\nDocument content:\n${extractData.extracted_text?.substring(0, 40000) || ''}`;
+          } else if (docType === 'transcript') {
+            aiPrompt += ` which is my academic transcript. Please extract all modules and marks, and create/update them in my system.`;
+            aiPrompt += `\n\nTranscript content:\n${extractData.extracted_text?.substring(0, 40000) || ''}`;
+          } else {
+            // Study material - show analysis in chat
+            let analysisMsg = `📄 **Analyzed: ${file.name}** (${docType.replace('_', ' ')})\n\n`;
+            if (analysis?.key_concepts?.length > 0) {
+              analysisMsg += `**Key Concepts:**\n${analysis.key_concepts.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}\n\n`;
+            }
+            if (analysis?.study_approach) {
+              analysisMsg += `**Study Approach:** ${analysis.study_approach}\n\n`;
+            }
+            if (analysis?.assessments_found?.length > 0) {
+              analysisMsg += `**Assessments Found:**\n${analysis.assessments_found.map((a: any) => `- ${a.name} (${a.type}, ${a.weight_percent}%)${a.due_date ? ` — Due: ${a.due_date}` : ''}`).join('\n')}\n\n`;
+            }
+            if (analysis?.quiz_questions?.length > 0) {
+              analysisMsg += `**Quiz Questions:**\n${analysis.quiz_questions.map((q: any, i: number) => `${i + 1}. ${q.question}\n   *Answer: ${q.answer}*`).join('\n\n')}`;
             }
             setMessages(prev => [...prev, { role: 'assistant', content: analysisMsg }]);
+            aiPrompt = ''; // Don't send to AI for study materials
+          }
+
+          // Send structured documents to AI for automated processing
+          if (aiPrompt) {
+            setUploading(false);
+            await sendMessage(aiPrompt, true);
+            return; // Don't set uploading false again
           }
         }
       } catch (e) {
@@ -238,7 +273,7 @@ export default function Advisor() {
       }
     }
     setUploading(false);
-  }, [user, selectedModuleId, selectedModule]);
+  }, [user, selectedModuleId, selectedModule, messages, profile, conversationId]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -252,8 +287,8 @@ export default function Advisor() {
     noKeyboard: true,
   });
 
-  const sendMessage = async (text: string) => {
-    if (!user || !text.trim() || loading) return;
+  const sendMessage = async (text: string, force = false) => {
+    if (!user || !text.trim() || (!force && loading)) return;
     const userMsg: Message = { role: 'user', content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
@@ -294,16 +329,18 @@ export default function Advisor() {
           const finalMessages = [...newMessages, { role: 'assistant' as const, content: assistantSoFar }];
           if (conversationId) {
             await supabase.from('ai_conversations').update({ messages: finalMessages as any }).eq('id', conversationId);
-          } else if (selectedModuleId) {
+          } else {
             const { data: conv } = await supabase.from('ai_conversations').insert({
-              user_id: user.id, module_id: selectedModuleId, messages: finalMessages as any,
+              user_id: user.id, module_id: selectedModuleId || null, messages: finalMessages as any,
             }).select().single();
             if (conv) setConversationId((conv as AIConversation).id);
           }
         },
         onToolResults: (results) => {
-          // Tool actions were performed — could refresh data
           console.log('Tool results:', results);
+          // Refresh modules list after tool actions
+          supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false)
+            .then(({ data }) => { if (data) setModules(data as Module[]); });
         },
       });
     } catch (err: any) {
@@ -340,7 +377,7 @@ export default function Advisor() {
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Context</h2>
         <div className="space-y-2">
           <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
-            <SelectTrigger><SelectValue placeholder="Select module" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="All modules (general)" /></SelectTrigger>
             <SelectContent>
               {modules.map(m => (
                 <SelectItem key={m.id} value={m.id}>
@@ -354,40 +391,42 @@ export default function Advisor() {
           </Select>
         </div>
 
-        {selectedModuleId && (
-          <>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-medium text-muted-foreground">Files ({files.length})</h3>
-                <label className="cursor-pointer">
-                  <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
-                    onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
-                  <div className="flex items-center gap-1 text-xs text-primary hover:underline">
-                    <Upload className="h-3 w-3" /> Upload
-                  </div>
-                </label>
+        {/* Upload section - always visible */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-medium text-muted-foreground">
+              Upload Documents
+            </h3>
+            <label className="cursor-pointer">
+              <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
+                onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
+              <div className="flex items-center gap-1 text-xs text-primary hover:underline">
+                <Upload className="h-3 w-3" /> Upload
               </div>
-              {uploading && (
-                <div className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Processing...
-                </div>
-              )}
-              {files.map(f => (
-                <div key={f.id} className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
-                  <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <span className="truncate">{f.file_name}</span>
-                </div>
-              ))}
+            </label>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Drop course outlines, transcripts, study guides, or any PDF. AI will auto-extract assessments, dates & weights.
+          </p>
+          {uploading && (
+            <div className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
+              <Loader2 className="h-3 w-3 animate-spin" /> Analyzing document...
             </div>
+          )}
+          {files.length > 0 && files.map(f => (
+            <div key={f.id} className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
+              <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+              <span className="truncate">{f.file_name}</span>
+            </div>
+          ))}
+        </div>
 
-            <div className="space-y-1 p-3 bg-surface-elevated rounded-md text-xs">
-              <p className="font-medium text-muted-foreground">Always in context:</p>
-              <p>Goal: {profile?.career_goal || 'Not set'}</p>
-              <p>Target: {profile?.target_average}%</p>
-              <p>Module files & notes included</p>
-            </div>
-          </>
-        )}
+        <div className="space-y-1 p-3 bg-accent/50 rounded-md text-xs">
+          <p className="font-medium text-muted-foreground">Always in context:</p>
+          <p>Goal: {profile?.career_goal || 'Not set'}</p>
+          <p>Target: {profile?.target_average}%</p>
+          <p>{selectedModuleId ? 'Module files & notes included' : 'All modules & data included'}</p>
+        </div>
 
         {messages.length > 0 && (
           <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" onClick={clearConversation}>
@@ -401,16 +440,15 @@ export default function Advisor() {
         {/* Mobile module selector */}
         <div className="lg:hidden p-3 border-b border-border flex gap-2">
           <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
-            <SelectTrigger className="flex-1"><SelectValue placeholder="Select module" /></SelectTrigger>
+            <SelectTrigger className="flex-1"><SelectValue placeholder="All modules" /></SelectTrigger>
             <SelectContent>
               {modules.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
             </SelectContent>
           </Select>
           <label className="cursor-pointer">
             <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
-              onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }}
-              disabled={!selectedModuleId} />
-            <Button variant="outline" size="icon" disabled={!selectedModuleId}><Upload className="h-4 w-4" /></Button>
+              onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
+            <Button variant="outline" size="icon"><Upload className="h-4 w-4" /></Button>
           </label>
         </div>
 

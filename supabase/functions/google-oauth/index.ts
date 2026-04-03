@@ -31,6 +31,44 @@ async function getUserFromRequest(req: Request): Promise<string | null> {
   return data?.user?.id || null;
 }
 
+async function getValidAccessToken(userId: string): Promise<string | null> {
+  const admin = getSupabaseAdmin();
+  const { data: tokenRow } = await admin
+    .from("google_tokens")
+    .select("*")
+    .eq("user_id", userId)
+    .single();
+
+  if (!tokenRow) return null;
+
+  // Check if expired
+  if (new Date(tokenRow.expires_at) < new Date()) {
+    // Refresh
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID!,
+        client_secret: GOOGLE_CLIENT_SECRET!,
+        refresh_token: tokenRow.refresh_token,
+        grant_type: "refresh_token",
+      }),
+    });
+    const newTokens = await tokenRes.json();
+    if (!tokenRes.ok) return null;
+
+    const expiresAt = new Date(Date.now() + newTokens.expires_in * 1000).toISOString();
+    await admin.from("google_tokens").update({
+      access_token: newTokens.access_token,
+      expires_at: expiresAt,
+    }).eq("user_id", userId);
+
+    return newTokens.access_token;
+  }
+
+  return tokenRow.access_token;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -86,7 +124,6 @@ Deno.serve(async (req) => {
         return Response.redirect(`${url.origin}/settings?google=error&reason=missing_params`, 302);
       }
 
-      // Exchange code for tokens
       const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -108,7 +145,6 @@ Deno.serve(async (req) => {
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
       const admin = getSupabaseAdmin();
 
-      // Upsert tokens
       const { error: dbError } = await admin.from("google_tokens").upsert(
         {
           user_id: userId,
@@ -124,13 +160,52 @@ Deno.serve(async (req) => {
         return Response.redirect(`${url.origin}/settings?google=error&reason=db_error`, 302);
       }
 
-      // Redirect back to the app's settings page (use the preview/published URL from the Origin or Referer)
-      // Since callback comes from Google, we'll redirect to the SUPABASE_URL origin's parent
-      // Use a known app URL pattern
       return new Response(
         `<html><body><script>window.location.href = "/settings?google=connected";</script></body></html>`,
         { headers: { "Content-Type": "text/html" } }
       );
+    }
+
+    // ── LIST CALENDARS ──
+    if (action === "calendars") {
+      const userId = await getUserFromRequest(req);
+      if (!userId) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const accessToken = await getValidAccessToken(userId);
+      if (!accessToken) {
+        return new Response(JSON.stringify({ error: "Google not connected" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const calRes = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!calRes.ok) {
+        const errText = await calRes.text();
+        console.error("Calendar list error:", errText);
+        return new Response(JSON.stringify({ error: "Failed to fetch calendars" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const calData = await calRes.json();
+      const calendars = (calData.items || []).map((c: any) => ({
+        id: c.id,
+        summary: c.summary,
+        primary: c.primary || false,
+        backgroundColor: c.backgroundColor,
+        accessRole: c.accessRole,
+      }));
+
+      return new Response(JSON.stringify({ calendars }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // ── REFRESH: Refresh access token ──

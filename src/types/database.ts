@@ -26,6 +26,7 @@ export interface UserProfile {
   preferred_checkin_time: string;
   created_at: string;
   updated_at: string;
+  google_calendar_id?: string;
 }
 
 export interface Module {

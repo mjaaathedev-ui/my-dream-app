@@ -30,7 +30,7 @@ const TOOLS = [
     type: "function",
     function: {
       name: "add_assessment",
-      description: "Add an assessment (test, assignment, exam, practical, project) to a module",
+      description: "Add an assessment (test, assignment, exam, practical, project) to a module. Use this when parsing course outlines, syllabi, or when a student mentions upcoming assessments.",
       parameters: {
         type: "object",
         properties: {
@@ -116,6 +116,77 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "bulk_create_from_document",
+      description: "Create multiple modules and assessments at once from a parsed document (course outline, syllabus, study guide). Use this when the student uploads a document and you detect modules and assessments.",
+      parameters: {
+        type: "object",
+        properties: {
+          modules: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                code: { type: "string" },
+                credit_weight: { type: "number" },
+                semester: { type: "string" },
+                assessments: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      type: { type: "string", enum: ["test", "assignment", "exam", "practical", "project"] },
+                      weight_percent: { type: "number" },
+                      due_date: { type: "string", description: "YYYY-MM-DD or null" },
+                      max_mark: { type: "number" },
+                      mark_achieved: { type: "number", description: "null if not yet submitted" },
+                    },
+                    required: ["name", "type", "weight_percent"],
+                  },
+                },
+              },
+              required: ["name", "assessments"],
+            },
+          },
+        },
+        required: ["modules"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_calendar_events",
+      description: "Create Google Calendar events for assessments with due dates. Only use if the student has Google Calendar connected.",
+      parameters: {
+        type: "object",
+        properties: {
+          events: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string", description: "Event title e.g. [CS201] Test 1 (30%)" },
+                date: { type: "string", description: "YYYY-MM-DD" },
+                description: { type: "string" },
+              },
+              required: ["title", "date"],
+            },
+          },
+        },
+        required: ["events"],
+      },
+    },
+  },
+];
+
+const MODULE_COLORS = [
+  "#2563EB", "#DC2626", "#16A34A", "#D97706", "#7C3AED",
+  "#DB2777", "#0891B2", "#65A30D", "#EA580C", "#4F46E5",
 ];
 
 async function executeTool(
@@ -145,7 +216,7 @@ async function executeTool(
           name: args.name,
           code: args.code || "",
           credit_weight: args.credit_weight || 16,
-          color: args.color || "#2563EB",
+          color: args.color || MODULE_COLORS[modules.length % MODULE_COLORS.length],
           semester: args.semester || "",
           sort_order: modules.length,
         })
@@ -168,7 +239,7 @@ async function executeTool(
         max_mark: args.max_mark || 100,
       });
       if (error) return `Error: ${error.message}`;
-      return `✅ Assessment "${args.name}" (${args.type}, ${args.weight_percent}%) added to ${mod.name}.`;
+      return `✅ Assessment "${args.name}" (${args.type}, ${args.weight_percent}%) added to ${mod.name}.${args.due_date ? ` Due: ${args.due_date}` : ''}`;
     }
     case "log_mark": {
       const mod = findModule(args.module_name);
@@ -240,6 +311,144 @@ async function executeTool(
       if (error) return `Error: ${error.message}`;
       return `✅ Study session (${args.duration_minutes}min) logged for ${mod.name}.`;
     }
+    case "bulk_create_from_document": {
+      const results: string[] = [];
+      for (const modData of args.modules || []) {
+        // Check if module exists
+        let mod = findModule(modData.name) || (modData.code ? findModule(modData.code) : null);
+        
+        if (!mod) {
+          const { data, error } = await supabaseAdmin.from("modules").insert({
+            user_id: userId,
+            name: modData.name,
+            code: modData.code || "",
+            credit_weight: modData.credit_weight || 16,
+            color: MODULE_COLORS[modules.length % MODULE_COLORS.length],
+            semester: modData.semester || "",
+            sort_order: modules.length,
+          }).select().single();
+          if (error) {
+            results.push(`❌ Failed to create module "${modData.name}": ${error.message}`);
+            continue;
+          }
+          mod = data;
+          modules.push(data);
+          results.push(`✅ Module "${modData.name}" created.`);
+        } else {
+          results.push(`📝 Module "${modData.name}" already exists.`);
+        }
+
+        // Add assessments
+        const assessments = modData.assessments || [];
+        if (assessments.length > 0) {
+          const rows = assessments.map((a: any) => ({
+            user_id: userId,
+            module_id: mod.id,
+            name: a.name,
+            type: a.type || "assignment",
+            weight_percent: a.weight_percent || 0,
+            due_date: a.due_date || null,
+            max_mark: a.max_mark || 100,
+            mark_achieved: a.mark_achieved ?? null,
+            submitted: a.mark_achieved != null,
+          }));
+          const { error } = await supabaseAdmin.from("assessments").insert(rows);
+          if (error) {
+            results.push(`  ❌ Failed to add assessments: ${error.message}`);
+          } else {
+            results.push(`  ✅ ${assessments.length} assessment(s) added to ${modData.name}.`);
+          }
+        }
+      }
+      return results.join("\n");
+    }
+    case "create_calendar_events": {
+      // Get user's Google token and calendar preference
+      const { data: tokenRow } = await supabaseAdmin
+        .from("google_tokens")
+        .select("*")
+        .eq("user_id", userId)
+        .single();
+      
+      if (!tokenRow) return "⚠️ Google Calendar not connected. Events not created.";
+
+      // Get preferred calendar
+      const { data: profileData } = await supabaseAdmin
+        .from("users_profile")
+        .select("google_calendar_id")
+        .eq("user_id", userId)
+        .single();
+      
+      const calendarId = profileData?.google_calendar_id || "primary";
+
+      // Check token expiry and refresh if needed
+      let accessToken = tokenRow.access_token;
+      if (new Date(tokenRow.expires_at) < new Date()) {
+        const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID");
+        const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET");
+        if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
+          const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              client_id: GOOGLE_CLIENT_ID,
+              client_secret: GOOGLE_CLIENT_SECRET,
+              refresh_token: tokenRow.refresh_token,
+              grant_type: "refresh_token",
+            }),
+          });
+          const newTokens = await tokenRes.json();
+          if (tokenRes.ok) {
+            accessToken = newTokens.access_token;
+            await supabaseAdmin.from("google_tokens").update({
+              access_token: newTokens.access_token,
+              expires_at: new Date(Date.now() + newTokens.expires_in * 1000).toISOString(),
+            }).eq("user_id", userId);
+          } else {
+            return "⚠️ Google token expired and refresh failed. Please reconnect Google in Settings.";
+          }
+        }
+      }
+
+      const results: string[] = [];
+      for (const event of args.events || []) {
+        try {
+          const eventDate = new Date(event.date);
+          const calRes = await fetch(
+            `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                summary: event.title,
+                description: event.description || "",
+                start: { date: event.date },
+                end: { date: event.date },
+                reminders: {
+                  useDefault: false,
+                  overrides: [
+                    { method: "popup", minutes: 7 * 24 * 60 },
+                    { method: "popup", minutes: 3 * 24 * 60 },
+                    { method: "popup", minutes: 1 * 24 * 60 },
+                  ],
+                },
+              }),
+            }
+          );
+          if (calRes.ok) {
+            results.push(`📅 "${event.title}" added to Google Calendar`);
+          } else {
+            results.push(`⚠️ Failed to add "${event.title}" to calendar`);
+          }
+        } catch {
+          results.push(`⚠️ Failed to add "${event.title}" to calendar`);
+        }
+      }
+      return results.join("\n");
+    }
     default:
       return `Unknown tool: ${toolName}`;
   }
@@ -253,7 +462,6 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    // Get user from auth header
     const authHeader = req.headers.get("authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -269,10 +477,28 @@ serve(async (req) => {
       userId = user?.id || null;
     }
 
-    // Build system prompt with context
-    let systemPrompt = `You are StudyOS, an academic advisor and mentor built into a student's study management app. You are direct, honest, motivating without being sycophantic. You know this student's goals and hold them to it. Help them understand their material, prepare for assessments, and stay on track.
+    // Check if user has Google Calendar connected
+    let hasGoogleCalendar = false;
+    if (userId) {
+      const { data: gToken } = await supabaseAdmin.from("google_tokens").select("id").eq("user_id", userId).single();
+      hasGoogleCalendar = !!gToken;
+    }
 
-You can take actions on behalf of the student using the tools provided. When a student mentions adding modules, assessments, study sessions, goals, or timetable entries, USE THE TOOLS to do it for them automatically. Don't just tell them how - actually do it.
+    let systemPrompt = `You are StudyOS, an academic advisor and mentor built into a student's study management app. You are direct, honest, motivating without being sycophantic. You know this student's goals and hold them to it.
+
+CRITICAL RULE: When a student asks you to add, create, log, or record ANYTHING (modules, assessments, marks, goals, timetable entries, study sessions), you MUST use the appropriate tool function. NEVER just say you did it — actually call the tool. If you don't call a tool, the data won't be saved.
+
+Available actions via tools:
+- add_module: Create a new module/course
+- add_assessment: Add a test, assignment, exam to a module
+- log_mark: Record a grade for an assessment
+- add_goal: Create a goal
+- add_timetable_entry: Add to weekly timetable
+- log_study_session: Log study time
+- bulk_create_from_document: Bulk create modules + assessments from uploaded documents
+- create_calendar_events: Add events to Google Calendar${hasGoogleCalendar ? ' (CONNECTED - use this when creating assessments with dates)' : ' (NOT connected)'}
+
+When a student uploads a document (course outline, syllabus, transcript), use bulk_create_from_document to automatically create ALL modules and assessments with dates and weightings.
 
 When you perform an action, confirm what you did and offer next steps.`;
 
@@ -280,14 +506,12 @@ When you perform an action, confirm what you did and offer next steps.`;
       systemPrompt += `\n\nStudent Context:\n${context}`;
     }
 
-    // Get modules for tool execution
     let modules: any[] = [];
     if (userId) {
       const { data } = await supabaseAdmin.from("modules").select("*").eq("user_id", userId);
       modules = data || [];
     }
 
-    // Prepare messages for AI
     const aiMessages = [
       { role: "system", content: systemPrompt },
       ...messages,
@@ -304,6 +528,7 @@ When you perform an action, confirm what you did and offer next steps.`;
         model: "google/gemini-2.5-flash",
         messages: aiMessages,
         tools: userId ? TOOLS : undefined,
+        tool_choice: userId ? "auto" : undefined,
         stream: false,
       }),
     });
@@ -332,6 +557,7 @@ When you perform an action, confirm what you did and offer next steps.`;
 
     const firstData = await firstResponse.json();
     const choice = firstData.choices?.[0];
+    console.log("AI finish_reason:", choice?.finish_reason, "has_tool_calls:", !!choice?.message?.tool_calls?.length);
 
     // Check for tool calls
     if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0 && userId) {
@@ -346,7 +572,9 @@ When you perform an action, confirm what you did and offer next steps.`;
         } catch {
           fnArgs = {};
         }
+        console.log("Executing tool:", fnName, "args:", JSON.stringify(fnArgs));
         const result = await executeTool(supabaseAdmin, userId, fnName, fnArgs, modules);
+        console.log("Tool result:", result);
         toolResults.push(result);
         toolMessages.push({
           role: "tool",
@@ -370,7 +598,6 @@ When you perform an action, confirm what you did and offer next steps.`;
       });
 
       if (!secondResponse.ok) {
-        // Fall back to returning tool results directly
         const fallbackContent = toolResults.join("\n\n");
         return new Response(
           JSON.stringify({
@@ -381,11 +608,13 @@ When you perform an action, confirm what you did and offer next steps.`;
         );
       }
 
+      // Encode tool results as base64 to avoid ByteString issues with emojis
+      const encodedResults = btoa(unescape(encodeURIComponent(JSON.stringify(toolResults))));
       return new Response(secondResponse.body, {
         headers: {
           ...corsHeaders,
           "Content-Type": "text/event-stream",
-          "X-Tool-Results": JSON.stringify(toolResults),
+          "X-Tool-Results": encodedResults,
         },
       });
     }
@@ -407,7 +636,6 @@ When you perform an action, confirm what you did and offer next steps.`;
     if (!streamResponse.ok) {
       const text = await streamResponse.text();
       console.error("Stream error:", text);
-      // Return non-streamed response from first call
       return new Response(JSON.stringify(firstData), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

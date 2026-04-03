@@ -21,13 +21,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const fetchingProfile = useRef(false);
   const initialized = useRef(false);
 
   const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
-    if (fetchingProfile.current) return null;
-    fetchingProfile.current = true;
     try {
+      console.log('[Auth] Fetching profile for', userId);
       const { data, error } = await supabase
         .from('users_profile')
         .select('*')
@@ -35,7 +33,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (error) {
-        // PGRST116 = no row found - profile trigger may not have fired yet
         if (error.code === 'PGRST116') {
           console.log('[Auth] No profile row yet, retrying in 1s...');
           await new Promise(r => setTimeout(r, 1000));
@@ -45,32 +42,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .eq('user_id', userId)
             .single();
           if (!retry.error && retry.data) {
-            setProfile(retry.data as UserProfile);
             return retry.data as UserProfile;
           }
-          // Still no profile — set null so routing doesn't hang forever
-          setProfile(null);
           return null;
         }
         console.error('[Auth] fetchProfile error:', error.message);
-        setProfile(null);
         return null;
       }
 
-      if (data) {
-        setProfile(data as UserProfile);
-        return data as UserProfile;
-      }
+      return (data as UserProfile) ?? null;
+    } catch (err) {
+      console.error('[Auth] fetchProfile exception:', err);
       return null;
-    } finally {
-      fetchingProfile.current = false;
     }
   };
 
   const refreshProfile = async () => {
     if (user) {
-      fetchingProfile.current = false;
-      await fetchProfile(user.id);
+      const p = await fetchProfile(user.id);
+      setProfile(p);
     }
   };
 
@@ -80,19 +70,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let mounted = true;
 
-    // Check if this is an OAuth callback — tokens appear in hash or search params
-    const isOAuthCallback =
-      window.location.hash.includes('access_token') ||
-      window.location.hash.includes('error') ||
-      window.location.search.includes('code=') ||
-      window.location.search.includes('error=');
+    console.log('[Auth] Init');
 
-    console.log('[Auth] Init | isOAuthCallback:', isOAuthCallback, '| hash:', window.location.hash.slice(0, 40), '| search:', window.location.search.slice(0, 40));
+    // Safety timeout - never stay on loading spinner forever
+    const safetyTimeout = setTimeout(() => {
+      if (mounted) {
+        console.warn('[Auth] Safety timeout hit - forcing loading=false');
+        setLoading(false);
+      }
+    }, 5000);
 
-    // Subscribe FIRST before getSession so we never miss an event
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('[Auth] Event:', event, '| User:', session?.user?.email ?? 'none');
+      async (event, sess) => {
+        console.log('[Auth] Event:', event, '| User:', sess?.user?.email ?? 'none');
         if (!mounted) return;
 
         if (event === 'SIGNED_OUT') {
@@ -103,47 +93,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (
-          event === 'SIGNED_IN' ||
-          event === 'INITIAL_SESSION' ||
-          event === 'TOKEN_REFRESHED' ||
-          event === 'USER_UPDATED'
-        ) {
-          if (session?.user) {
-            setSession(session);
-            setUser(session.user);
-            fetchingProfile.current = false;
-            await fetchProfile(session.user.id);
-          } else {
-            // INITIAL_SESSION with no user = definitely logged out
-            setProfile(null);
+        if (event === 'TOKEN_REFRESHED') {
+          if (sess) {
+            setSession(sess);
+            setUser(sess.user);
           }
-          setLoading(false);
           return;
+        }
+
+        // SIGNED_IN, INITIAL_SESSION, USER_UPDATED
+        if (sess?.user) {
+          setSession(sess);
+          setUser(sess.user);
+          // Use setTimeout to avoid Supabase deadlock with auth state listener
+          setTimeout(async () => {
+            if (!mounted) return;
+            const p = await fetchProfile(sess.user.id);
+            if (mounted) {
+              setProfile(p);
+              setLoading(false);
+            }
+          }, 0);
+        } else {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
         }
       }
     );
 
-    // If NOT an OAuth callback, also call getSession as a fallback
-    // (handles page refreshes where onAuthStateChange may not fire SIGNED_IN)
-    if (!isOAuthCallback) {
-      supabase.auth.getSession().then(async ({ data: { session } }) => {
-        console.log('[Auth] getSession fallback:', session?.user?.email ?? 'no session');
-        if (!mounted) return;
-        // onAuthStateChange INITIAL_SESSION will also fire — whichever resolves
-        // last wins, which is fine since they carry the same session
-        if (session?.user && !user) {
-          setSession(session);
-          setUser(session.user);
-          fetchingProfile.current = false;
-          await fetchProfile(session.user.id);
-          if (mounted) setLoading(false);
-        }
-      });
-    }
-
     return () => {
       mounted = false;
+      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, []);
