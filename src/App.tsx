@@ -67,6 +67,14 @@ function AuthRoute() {
   return <Auth />;
 }
 
+function RootRoute() {
+  const { user, loading } = useAuth();
+
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/auth" replace />;
+  return <Navigate to="/dashboard" replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -76,7 +84,7 @@ const App = () => (
         <AuthProvider>
           <Suspense fallback={<LoadingScreen />}>
             <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/" element={<RootRoute />} />
               <Route path="/auth" element={<AuthRoute />} />
               <Route path="/onboarding" element={<OnboardingRoute />} />
               <Route
