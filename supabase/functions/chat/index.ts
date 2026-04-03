@@ -522,6 +522,7 @@ When you perform an action, confirm what you did and offer next steps.`;
         model: "google/gemini-2.5-flash",
         messages: aiMessages,
         tools: userId ? TOOLS : undefined,
+        tool_choice: userId ? "auto" : undefined,
         stream: false,
       }),
     });
