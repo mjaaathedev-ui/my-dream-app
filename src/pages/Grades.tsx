@@ -199,13 +199,8 @@ export default function Grades() {
       return;
     }
 
-    if (formData.mark_achieved === '') {
-      toast.error('Please enter a mark achieved');
-      return;
-    }
-
     try {
-      const markValue = formData.mark_achieved ? parseInt(formData.mark_achieved) : null;
+      const markValue = formData.mark_achieved !== '' ? parseInt(formData.mark_achieved) : null;
       const maxMark = parseInt(formData.max_mark);
       const weightPercent = parseInt(formData.weight_percent);
 
@@ -306,17 +301,14 @@ export default function Grades() {
     setOpenDialog(true);
   };
 
-  // CORRECTED CALCULATION: Current progress ONLY from submitted assessments
   const gradesByModule: GradeData[] = useMemo(() => {
     return modules.map(module => {
       const moduleAssessments = assessments.filter(a => a.module_id === module.id);
       
-      // Only assessments with grades entered
       const submittedAssessments = moduleAssessments.filter(
         a => a.mark_achieved !== null && a.mark_achieved !== undefined && a.submitted
       );
 
-      // Assessments without grades
       const pendingAssessments = moduleAssessments.filter(
         a => a.mark_achieved === null || !a.submitted
       );
@@ -325,7 +317,6 @@ export default function Grades() {
       let currentProgressWeight = 0;
 
       if (submittedAssessments.length > 0) {
-        // Calculate current progress: Sum((mark_achieved / max_mark) * 100 * weight) / Sum(weight)
         const weightedScoreSum = submittedAssessments.reduce((sum, assessment) => {
           const percentage = (assessment.mark_achieved! / assessment.max_mark) * 100;
           const weightedScore = (percentage * assessment.weight_percent) / 100;
@@ -334,11 +325,9 @@ export default function Grades() {
 
         currentProgressWeight = submittedAssessments.reduce((sum, a) => sum + a.weight_percent, 0);
         
-        // Current progress is the weighted average
         currentProgress = currentProgressWeight > 0 ? (weightedScoreSum / currentProgressWeight) * 100 : 0;
       }
 
-      // Calculate pending weight
       const pendingWeight = pendingAssessments.reduce((sum, a) => sum + a.weight_percent, 0);
 
       return { 
@@ -353,12 +342,10 @@ export default function Grades() {
     });
   }, [modules, assessments]);
 
-  // Calculate module goals with required averages - DYNAMIC
   const moduleGoalsData: ModuleGoal[] = useMemo(() => {
     return gradesByModule.map(({ module, currentProgress, currentProgressWeight, pendingWeight }) => {
       const targetGrade = moduleGoals[module.id] || 70;
       
-      // No pending assessments - current progress is final
       if (pendingWeight === 0) {
         const isAchieved = currentProgress >= targetGrade;
         return {
@@ -374,8 +361,6 @@ export default function Grades() {
         };
       }
 
-      // Calculate required average on remaining assessments to reach target
-      // Formula: (targetGrade - currentProgress * currentProgressWeight / 100) / (pendingWeight / 100)
       const requiredAverage = (targetGrade - (currentProgress * currentProgressWeight / 100)) / (pendingWeight / 100);
 
       let status: 'achieved' | 'challenging' | 'achievable' | 'impossible' = 'achievable';
@@ -407,7 +392,6 @@ export default function Grades() {
     });
   }, [gradesByModule, moduleGoals]);
 
-  // Overall Progress (weighted by credits, only from modules with submitted grades)
   const { overallProgress, totalCreditsWithGrades } = useMemo(() => {
     const modulesWithGrades = gradesByModule.filter(
       g => g.submittedAssessments.length > 0 && g.currentProgress > 0
@@ -497,7 +481,6 @@ export default function Grades() {
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Grades & Assessments</h1>
@@ -610,7 +593,7 @@ export default function Grades() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium">Mark Achieved *</label>
+                    <label className="text-sm font-medium">Mark Achieved <span className="text-muted-foreground font-normal">(optional)</span></label>
                     <Input 
                       type="number" 
                       value={formData.mark_achieved} 
@@ -652,7 +635,6 @@ export default function Grades() {
         </div>
       </div>
 
-      {/* Overall Stats - UPDATED */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-6">
@@ -706,7 +688,6 @@ export default function Grades() {
         </Card>
       </div>
 
-      {/* Warning if no grades yet */}
       {gradesByModule.every(g => g.submittedAssessments.length === 0) && (
         <Card className="border-amber-200 bg-amber-50">
           <CardContent className="pt-6">
@@ -723,9 +704,7 @@ export default function Grades() {
         </Card>
       )}
 
-      {/* Modules and Assessments Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Modules Sidebar */}
         <div className="lg:col-span-1 space-y-4">
           <Card>
             <CardHeader className="pb-3">
@@ -779,7 +758,6 @@ export default function Grades() {
             </CardContent>
           </Card>
 
-          {/* Quick Actions for AI */}
           <Card className="border-blue-200 bg-blue-50">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm flex items-center gap-2 text-blue-900">
@@ -806,11 +784,9 @@ export default function Grades() {
           </Card>
         </div>
 
-        {/* Assessments and Goals */}
         <div className="lg:col-span-3 space-y-4">
           {selectedModuleData && selectedModuleGoal && (
             <>
-              {/* Module Header */}
               <Card>
                 <CardHeader>
                   <div className="flex items-start justify-between gap-4">
@@ -833,7 +809,6 @@ export default function Grades() {
                 </CardHeader>
               </Card>
 
-              {/* Goal Achievement Card */}
               {moduleGoals[selectedModuleData.module.id] && (
                 <Card className={`border-2 ${getGoalStatusColor(selectedModuleGoal.status)}`}>
                   <CardContent className="pt-6">
@@ -892,10 +867,8 @@ export default function Grades() {
                 </Card>
               )}
 
-              {/* Assessments Section */}
               {selectedModuleData.assessments.length > 0 ? (
                 <div className="space-y-3">
-                  {/* Submitted Assessments */}
                   {selectedModuleData.submittedAssessments.length > 0 && (
                     <div className="space-y-2">
                       <h3 className="text-sm font-semibold text-green-700">Submitted Assessments ({selectedModuleData.submittedAssessments.length})</h3>
@@ -957,7 +930,6 @@ export default function Grades() {
                     </div>
                   )}
 
-                  {/* Pending Assessments */}
                   {selectedModuleData.pendingAssessments.length > 0 && (
                     <div className="space-y-2">
                       <h3 className="text-sm font-semibold text-amber-700">Pending Assessments ({selectedModuleData.pendingAssessments.length})</h3>
