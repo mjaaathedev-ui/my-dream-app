@@ -58,7 +58,6 @@ export interface Assessment {
   notes: string;
   google_event_id?: string | null;
   created_at: string;
-  // joined
   module?: Module;
 }
 
@@ -92,17 +91,49 @@ export interface UploadedFile {
   upload_date: string;
 }
 
+// ── Extended TimetableEntry ───────────────────────────────────────────────────
+
 export interface TimetableEntry {
   id: string;
   user_id: string;
   title: string;
+
+  /** Visual / semantic type of the block */
   type: string;
-  module_id: string | null;
+
+  /**
+   * Scheduling type:
+   *   'once'      — appears only on `specific_date`
+   *   'recurring' — repeats on `day_of_week` with `recurrence` pattern
+   */
+  entry_type: 'once' | 'recurring';
+
+  /**
+   * ISO date string (YYYY-MM-DD) for one-time entries.
+   * null for recurring entries.
+   */
+  specific_date: string | null;
+
+  /**
+   * 0 = Monday … 6 = Sunday  (DB convention, NOT JS getDay())
+   * For one-time entries this is derived from specific_date on save.
+   * For recurring entries this is the authoritative day.
+   */
   day_of_week: number;
-  start_time: string;
-  end_time: string;
+
+  /** How often the entry repeats (only relevant for recurring entries) */
+  recurrence: 'weekly' | 'biweekly' | 'monthly';
+
+  start_time: string;   // "HH:MM" 24-hour
+  end_time: string;     // "HH:MM" 24-hour
   location: string;
+  notes: string | null;
+  category: string | null;
+  module_id: string | null;
+
+  /** Keep for Google Calendar sync compatibility */
   recurring: boolean;
+
   color: string;
   is_suggested: boolean;
   created_at: string;
@@ -175,9 +206,11 @@ export interface AIConversation {
   updated_at: string;
 }
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
 export const CAREER_FIELDS = [
   'Engineering',
-  'Medicine', 
+  'Medicine',
   'Law',
   'Commerce',
   'Sciences',
@@ -188,7 +221,7 @@ export const CAREER_FIELDS = [
 
 export const YEAR_OPTIONS = [
   '1st Year',
-  '2nd Year', 
+  '2nd Year',
   '3rd Year',
   '4th Year',
   'Honours',
@@ -204,13 +237,37 @@ export const ASSESSMENT_TYPES = [
 ] as const;
 
 export const SESSION_TYPES = [
-  { value: 'pomodoro', label: 'Pomodoro (50/10)', work: 50, break: 10 },
-  { value: 'deep_work', label: 'Deep Work (90 min)', work: 90, break: 15 },
-  { value: 'quick_review', label: 'Quick Review (25 min)', work: 25, break: 5 },
-  { value: 'custom', label: 'Custom', work: 0, break: 0 },
+  { value: 'pomodoro',     label: 'Pomodoro (50/10)',      work: 50, break: 10 },
+  { value: 'deep_work',   label: 'Deep Work (90 min)',     work: 90, break: 15 },
+  { value: 'quick_review',label: 'Quick Review (25 min)',  work: 25, break: 5  },
+  { value: 'custom',      label: 'Custom',                 work: 0,  break: 0  },
 ] as const;
 
 export const MODULE_COLORS = [
   '#2563EB', '#DC2626', '#16A34A', '#D97706', '#7C3AED',
   '#DB2777', '#0891B2', '#65A30D', '#EA580C', '#4F46E5',
+] as const;
+
+export const TIMETABLE_ENTRY_TYPES = [
+  'class', 'tutorial', 'practical', 'study', 'personal', 'assessment',
+] as const;
+
+export const TIMETABLE_ENTRY_COLORS: Record<string, string> = {
+  class:      '#2563EB',
+  tutorial:   '#7C3AED',
+  practical:  '#0891B2',
+  study:      '#16A34A',
+  personal:   '#D97706',
+  assessment: '#DC2626',
+};
+
+export const TIMETABLE_CATEGORIES = [
+  'Lecture',
+  'Tutorial',
+  'Practical',
+  'Study',
+  'Assignment',
+  'Exam',
+  'Personal',
+  'Other',
 ] as const;
