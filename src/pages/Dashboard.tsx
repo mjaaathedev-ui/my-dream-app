@@ -43,7 +43,45 @@ export default function Dashboard() {
     fetchData();
   }, [user, profile?.career_field]);
 
-  // Calculate metrics
+  // Calculate overall progress based on current module progress
+  const overallProgress = useMemo(() => {
+    const modulesData = modules.map(module => {
+      const moduleAssessments = assessments.filter(a => a.module_id === module.id);
+      const submittedAssessments = moduleAssessments.filter(
+        a => a.mark_achieved !== null && a.mark_achieved !== undefined && a.submitted
+      );
+
+      let currentProgress = 0;
+      let currentProgressWeight = 0;
+
+      if (submittedAssessments.length > 0) {
+        const weightedScoreSum = submittedAssessments.reduce((sum, assessment) => {
+          const percentage = (assessment.mark_achieved! / assessment.max_mark) * 100;
+          const weightedScore = (percentage * assessment.weight_percent) / 100;
+          return sum + weightedScore;
+        }, 0);
+
+        currentProgressWeight = submittedAssessments.reduce((sum, a) => sum + a.weight_percent, 0);
+        currentProgress = currentProgressWeight > 0 ? (weightedScoreSum / currentProgressWeight) * 100 : 0;
+      }
+
+      return { currentProgress, creditWeight: module.credit_weight, hasGrades: submittedAssessments.length > 0 };
+    });
+
+    const modulesWithGrades = modulesData.filter(m => m.hasGrades && m.currentProgress > 0);
+    if (modulesWithGrades.length === 0) return 0;
+
+    const totalWeightedScore = modulesWithGrades.reduce((sum, m) => {
+      return sum + (m.currentProgress * m.creditWeight);
+    }, 0);
+
+    const totalCreditWeight = modulesWithGrades.reduce((sum, m) => {
+      return sum + m.creditWeight;
+    }, 0);
+
+    return totalCreditWeight > 0 ? totalWeightedScore / totalCreditWeight : 0;
+  }, [modules, assessments]);
+
   const currentAverage = useMemo(() => {
     const submitted = assessments.filter(a => a.submitted && a.mark_achieved !== null);
     if (submitted.length === 0) return 0;
@@ -75,7 +113,6 @@ export default function Dashboard() {
     return streak;
   }, [sessions]);
 
-  // Weekly chart data
   const weeklyData = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
       const date = subDays(new Date(), 6 - i);
@@ -87,7 +124,6 @@ export default function Dashboard() {
     });
   }, [sessions]);
 
-  // Upcoming assessments
   const upcoming = useMemo(() => {
     return assessments
       .filter(a => a.due_date && !a.submitted && isAfter(new Date(a.due_date), new Date()))
@@ -100,7 +136,6 @@ export default function Dashboard() {
       }));
   }, [assessments, modules]);
 
-  // Lock-in status
   const lockInStatus = useMemo(() => {
     const last7 = Array.from({ length: 7 }, (_, i) => format(subDays(new Date(), i), 'yyyy-MM-dd'));
     const daysStudied = last7.filter(d => sessions.some(s => format(new Date(s.started_at), 'yyyy-MM-dd') === d)).length;
@@ -162,10 +197,30 @@ export default function Dashboard() {
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard title="Current Average" value={`${currentAverage}%`} icon={TrendingUp} subtitle={assessments.filter(a => a.submitted).length > 0 ? `From ${assessments.filter(a => a.submitted).length} assessments` : 'No marks yet'} />
-        <MetricCard title="Target Average" value={`${profile?.target_average || 70}%`} icon={Target} subtitle={currentAverage >= (profile?.target_average || 70) ? 'On track ✓' : `${(profile?.target_average || 70) - currentAverage}% to go`} />
-        <MetricCard title="Study This Week" value={`${Math.round(studyHoursThisWeek * 10) / 10}h`} icon={Timer} subtitle={`Target: ${(profile?.daily_study_target_hours || 4) * 7}h`} />
-        <MetricCard title="Day Streak" value={dayStreak} icon={Flame} subtitle={lockInStatus.label + ' ' + lockInStatus.emoji} />
+        <MetricCard 
+          title="Overall Progress" 
+          value={`${overallProgress.toFixed(2)}%`} 
+          icon={TrendingUp} 
+          subtitle={modules.filter(m => assessments.some(a => a.module_id === m.id && a.submitted)).length > 0 ? `Across all modules` : 'No grades yet'}
+        />
+        <MetricCard 
+          title="Target Average" 
+          value={`${profile?.target_average || 70}%`} 
+          icon={Target} 
+          subtitle={currentAverage >= (profile?.target_average || 70) ? 'On track ✓' : `${(profile?.target_average || 70) - currentAverage} to go`} 
+        />
+        <MetricCard 
+          title="Study This Week" 
+          value={`${Math.round(studyHoursThisWeek * 10) / 10}h`} 
+          icon={Timer} 
+          subtitle={`Target: ${(profile?.daily_study_target_hours || 4) * 7}h`} 
+        />
+        <MetricCard 
+          title="Day Streak" 
+          value={dayStreak} 
+          icon={Flame} 
+          subtitle={lockInStatus.label + ' ' + lockInStatus.emoji} 
+        />
       </div>
 
       {/* Priority cards */}

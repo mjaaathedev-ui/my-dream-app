@@ -325,8 +325,7 @@ export default function Grades() {
       let currentProgressWeight = 0;
 
       if (submittedAssessments.length > 0) {
-        // Calculate current progress ONLY on submitted assessments
-        // Formula: Sum((mark_achieved / max_mark) * weight_percent) / Sum(weight_percent)
+        // Calculate current progress: Sum((mark_achieved / max_mark) * 100 * weight) / Sum(weight)
         const weightedScoreSum = submittedAssessments.reduce((sum, assessment) => {
           const percentage = (assessment.mark_achieved! / assessment.max_mark) * 100;
           const weightedScore = (percentage * assessment.weight_percent) / 100;
@@ -335,8 +334,8 @@ export default function Grades() {
 
         currentProgressWeight = submittedAssessments.reduce((sum, a) => sum + a.weight_percent, 0);
         
-        // Current progress is weighted by submitted assessments only
-        currentProgress = weightedScoreSum;
+        // Current progress is the weighted average
+        currentProgress = currentProgressWeight > 0 ? (weightedScoreSum / currentProgressWeight) * 100 : 0;
       }
 
       // Calculate pending weight
@@ -376,9 +375,8 @@ export default function Grades() {
       }
 
       // Calculate required average on remaining assessments to reach target
-      // Formula: (targetGrade * 100 - currentProgress * currentProgressWeight) / pendingWeight
-      const numerator = (targetGrade * 100) - (currentProgress * currentProgressWeight);
-      const requiredAverage = numerator / pendingWeight;
+      // Formula: (targetGrade - currentProgress * currentProgressWeight / 100) / (pendingWeight / 100)
+      const requiredAverage = (targetGrade - (currentProgress * currentProgressWeight / 100)) / (pendingWeight / 100);
 
       let status: 'achieved' | 'challenging' | 'achievable' | 'impossible' = 'achievable';
       let message = '';
@@ -409,14 +407,14 @@ export default function Grades() {
     });
   }, [gradesByModule, moduleGoals]);
 
-  // Overall GPA (weighted by credits, only from submitted grades)
-  const { overallAverage, totalCreditsWithGrades } = useMemo(() => {
+  // Overall Progress (weighted by credits, only from modules with submitted grades)
+  const { overallProgress, totalCreditsWithGrades } = useMemo(() => {
     const modulesWithGrades = gradesByModule.filter(
       g => g.submittedAssessments.length > 0 && g.currentProgress > 0
     );
 
     if (modulesWithGrades.length === 0) {
-      return { overallAverage: 0, totalCreditsWithGrades: 0 };
+      return { overallProgress: 0, totalCreditsWithGrades: 0 };
     }
 
     const totalWeightedScore = modulesWithGrades.reduce((sum, g) => {
@@ -429,7 +427,7 @@ export default function Grades() {
 
     const average = totalCreditWeight > 0 ? totalWeightedScore / totalCreditWeight : 0;
 
-    return { overallAverage: average, totalCreditsWithGrades: totalCreditWeight };
+    return { overallProgress: average, totalCreditsWithGrades: totalCreditWeight };
   }, [gradesByModule]);
 
   const selectedModuleData = gradesByModule.find(
@@ -654,18 +652,22 @@ export default function Grades() {
         </div>
       </div>
 
-      {/* Overall Stats */}
+      {/* Overall Stats - UPDATED */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Current Progress</p>
-                <p className={`text-3xl font-bold mt-1 ${getGradeColor(overallAverage)}`}>
-                  {overallAverage.toFixed(2)}%
+                <p className={`text-3xl font-bold mt-1 ${getGradeColor(selectedModuleData?.currentProgress || 0)}`}>
+                  {selectedModuleData && selectedModuleData.currentProgressWeight > 0 
+                    ? selectedModuleData.currentProgress.toFixed(2) 
+                    : 'N/A'}%
                 </p>
                 <p className="text-xs text-muted-foreground mt-2">
-                  {totalCreditsWithGrades > 0 ? `Based on ${totalCreditsWithGrades} credits` : 'No grades yet'}
+                  {selectedModuleData && selectedModuleData.currentProgressWeight > 0 
+                    ? `Based on ${selectedModuleData.currentProgressWeight.toFixed(0)}% total weight` 
+                    : 'No assessments yet'}
                 </p>
               </div>
               <TrendingUp className="h-8 w-8 text-primary opacity-20" />
@@ -820,7 +822,7 @@ export default function Grades() {
                     </div>
                     <div className={`text-right p-4 rounded-lg ${getGradeBgColor(selectedModuleData.currentProgress)}`}>
                       <p className={`text-2xl font-bold ${getGradeColor(selectedModuleData.currentProgress)}`}>
-                        {selectedModuleData.currentProgressWeight > 0 ? selectedModuleData.currentProgress.toFixed(1) : 'N/A'}%
+                        {selectedModuleData.currentProgressWeight > 0 ? selectedModuleData.currentProgress.toFixed(2) : 'N/A'}%
                       </p>
                       <p className="text-xs text-muted-foreground">Current Progress</p>
                       <p className="text-xs mt-1">
