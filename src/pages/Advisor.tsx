@@ -55,11 +55,12 @@ async function streamChat({
     throw new Error(errorData.error || `Error ${resp.status}`);
   }
 
-  // Check for tool results header
+  // Check for tool results header (base64 encoded to avoid ByteString issues)
   const toolResultsHeader = resp.headers.get('X-Tool-Results');
   if (toolResultsHeader && onToolResults) {
     try {
-      onToolResults(JSON.parse(toolResultsHeader));
+      const decoded = decodeURIComponent(escape(atob(toolResultsHeader)));
+      onToolResults(JSON.parse(decoded));
     } catch {}
   }
 
