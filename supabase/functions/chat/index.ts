@@ -572,7 +572,9 @@ When you perform an action, confirm what you did and offer next steps.`;
         } catch {
           fnArgs = {};
         }
+        console.log("Executing tool:", fnName, "args:", JSON.stringify(fnArgs));
         const result = await executeTool(supabaseAdmin, userId, fnName, fnArgs, modules);
+        console.log("Tool result:", result);
         toolResults.push(result);
         toolMessages.push({
           role: "tool",
