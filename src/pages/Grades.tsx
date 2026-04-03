@@ -37,15 +37,15 @@ interface GradeData {
   assessments: Assessment[];
   submittedAssessments: Assessment[];
   pendingAssessments: Assessment[];
-  moduleAverage: number;
-  submittedWeight: number;
+  currentProgress: number;
+  currentProgressWeight: number;
   pendingWeight: number;
 }
 
 interface ModuleGoal {
   moduleId: string;
   targetGrade: number;
-  currentAverage: number;
+  currentProgress: number;
   requiredAverage: number;
   isAchievable: boolean;
   status: 'achieved' | 'challenging' | 'achievable' | 'impossible';
@@ -306,7 +306,7 @@ export default function Grades() {
     setOpenDialog(true);
   };
 
-  // Calculate grades ONLY from submitted assessments
+  // CORRECTED CALCULATION: Current progress ONLY from submitted assessments
   const gradesByModule: GradeData[] = useMemo(() => {
     return modules.map(module => {
       const moduleAssessments = assessments.filter(a => a.module_id === module.id);
@@ -321,23 +321,22 @@ export default function Grades() {
         a => a.mark_achieved === null || !a.submitted
       );
 
-      let moduleAverage = 0;
-      let submittedWeight = 0;
+      let currentProgress = 0;
+      let currentProgressWeight = 0;
 
       if (submittedAssessments.length > 0) {
-        // Calculate weighted average ONLY from submitted assessments
-        const totalWeightedScore = submittedAssessments.reduce((sum, assessment) => {
+        // Calculate current progress ONLY on submitted assessments
+        // Formula: Sum((mark_achieved / max_mark) * weight_percent) / Sum(weight_percent)
+        const weightedScoreSum = submittedAssessments.reduce((sum, assessment) => {
           const percentage = (assessment.mark_achieved! / assessment.max_mark) * 100;
           const weightedScore = (percentage * assessment.weight_percent) / 100;
           return sum + weightedScore;
         }, 0);
 
-        submittedWeight = submittedAssessments.reduce((sum, a) => sum + a.weight_percent, 0);
+        currentProgressWeight = submittedAssessments.reduce((sum, a) => sum + a.weight_percent, 0);
         
-        // Only calculate average based on submitted weights
-        if (submittedWeight > 0) {
-          moduleAverage = totalWeightedScore;
-        }
+        // Current progress is weighted by submitted assessments only
+        currentProgress = weightedScoreSum;
       }
 
       // Calculate pending weight
@@ -348,8 +347,8 @@ export default function Grades() {
         assessments: moduleAssessments, 
         submittedAssessments,
         pendingAssessments,
-        moduleAverage,
-        submittedWeight,
+        currentProgress,
+        currentProgressWeight,
         pendingWeight,
       };
     });
@@ -357,28 +356,28 @@ export default function Grades() {
 
   // Calculate module goals with required averages - DYNAMIC
   const moduleGoalsData: ModuleGoal[] = useMemo(() => {
-    return gradesByModule.map(({ module, moduleAverage, submittedWeight, pendingWeight }) => {
+    return gradesByModule.map(({ module, currentProgress, currentProgressWeight, pendingWeight }) => {
       const targetGrade = moduleGoals[module.id] || 70;
       
-      // No pending assessments
+      // No pending assessments - current progress is final
       if (pendingWeight === 0) {
-        const isAchieved = moduleAverage >= targetGrade;
+        const isAchieved = currentProgress >= targetGrade;
         return {
           moduleId: module.id,
           targetGrade,
-          currentAverage: moduleAverage,
+          currentProgress: currentProgress,
           requiredAverage: 0,
           isAchievable: isAchieved,
           status: isAchieved ? 'achieved' : 'impossible',
           message: isAchieved 
-            ? `Target Achieved: Your current average of ${moduleAverage.toFixed(1)}% meets your goal of ${targetGrade}%`
-            : `Target Not Met: Your current average of ${moduleAverage.toFixed(1)}% is below your goal of ${targetGrade}%`,
+            ? `Target Achieved: Your current progress of ${currentProgress.toFixed(1)}% meets your goal of ${targetGrade}%`
+            : `Target Not Met: Your current progress of ${currentProgress.toFixed(1)}% is below your goal of ${targetGrade}%`,
         };
       }
 
-      // Calculate required average on remaining assessments
-      // Formula: (Target% * 100 - currentAverage * submittedWeight) / pendingWeight
-      const numerator = (targetGrade * 100) - (moduleAverage * submittedWeight);
+      // Calculate required average on remaining assessments to reach target
+      // Formula: (targetGrade * 100 - currentProgress * currentProgressWeight) / pendingWeight
+      const numerator = (targetGrade * 100) - (currentProgress * currentProgressWeight);
       const requiredAverage = numerator / pendingWeight;
 
       let status: 'achieved' | 'challenging' | 'achievable' | 'impossible' = 'achievable';
@@ -386,7 +385,7 @@ export default function Grades() {
 
       if (requiredAverage <= 0) {
         status = 'achieved';
-        message = `Target Secure: Your current average of ${moduleAverage.toFixed(1)}% already guarantees your goal of ${targetGrade}%, even with 0% on remaining assessments.`;
+        message = `Target Secure: Your current progress of ${currentProgress.toFixed(1)}% (from ${currentProgressWeight.toFixed(0)}% of work) already guarantees your goal of ${targetGrade}%, even with 0% on remaining assessments.`;
       } else if (requiredAverage > 100) {
         status = 'impossible';
         message = `Target Impossible: You need ${requiredAverage.toFixed(1)}% on remaining assessments to reach ${targetGrade}%, but the maximum is 100%. Adjust your goal or improve previous work.`;
@@ -401,7 +400,7 @@ export default function Grades() {
       return {
         moduleId: module.id,
         targetGrade,
-        currentAverage: moduleAverage,
+        currentProgress: currentProgress,
         requiredAverage: Math.max(0, requiredAverage),
         isAchievable: requiredAverage <= 100 && requiredAverage > 0,
         status,
@@ -413,7 +412,7 @@ export default function Grades() {
   // Overall GPA (weighted by credits, only from submitted grades)
   const { overallAverage, totalCreditsWithGrades } = useMemo(() => {
     const modulesWithGrades = gradesByModule.filter(
-      g => g.submittedAssessments.length > 0 && g.moduleAverage > 0
+      g => g.submittedAssessments.length > 0 && g.currentProgress > 0
     );
 
     if (modulesWithGrades.length === 0) {
@@ -421,7 +420,7 @@ export default function Grades() {
     }
 
     const totalWeightedScore = modulesWithGrades.reduce((sum, g) => {
-      return sum + (g.moduleAverage * g.module.credit_weight);
+      return sum + (g.currentProgress * g.module.credit_weight);
     }, 0);
 
     const totalCreditWeight = modulesWithGrades.reduce((sum, g) => {
@@ -504,7 +503,7 @@ export default function Grades() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Grades & Assessments</h1>
-          <p className="text-muted-foreground mt-1">Track grades and plan to achieve your goals</p>
+          <p className="text-muted-foreground mt-1">Track your current progress and plan to achieve your goals</p>
         </div>
         <div className="flex gap-2">
           <Dialog open={openModuleGoalDialog} onOpenChange={setOpenModuleGoalDialog}>
@@ -661,12 +660,12 @@ export default function Grades() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Overall GPA (Submitted)</p>
+                <p className="text-sm text-muted-foreground">Current Progress</p>
                 <p className={`text-3xl font-bold mt-1 ${getGradeColor(overallAverage)}`}>
                   {overallAverage.toFixed(2)}%
                 </p>
                 <p className="text-xs text-muted-foreground mt-2">
-                  {totalCreditsWithGrades > 0 ? `From ${totalCreditsWithGrades} credits with grades` : 'No grades yet'}
+                  {totalCreditsWithGrades > 0 ? `Based on ${totalCreditsWithGrades} credits` : 'No grades yet'}
                 </p>
               </div>
               <TrendingUp className="h-8 w-8 text-primary opacity-20" />
@@ -714,7 +713,7 @@ export default function Grades() {
               <div>
                 <p className="font-medium text-amber-900">No grades recorded yet</p>
                 <p className="text-sm text-amber-800 mt-1">
-                  Add assessments with marks to see your GPA calculation and goal tracking
+                  Add assessments with marks to see your progress and goal tracking
                 </p>
               </div>
             </div>
@@ -734,7 +733,7 @@ export default function Grades() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {gradesByModule.map(({ module, moduleAverage, submittedAssessments, submittedWeight, pendingWeight }) => {
+              {gradesByModule.map(({ module, currentProgress, submittedAssessments, currentProgressWeight, pendingWeight }) => {
                 const goal = moduleGoalsData.find(g => g.moduleId === module.id);
                 return (
                   <button
@@ -753,11 +752,11 @@ export default function Grades() {
                     <p className="text-xs text-muted-foreground truncate">{module.name}</p>
                     <div className="mt-2 space-y-1">
                       <div>
-                        <p className={`text-xs font-semibold ${getGradeColor(moduleAverage)}`}>
-                          {submittedWeight > 0 ? `${moduleAverage.toFixed(1)}%` : 'No grades'}
+                        <p className={`text-xs font-semibold ${getGradeColor(currentProgress)}`}>
+                          {currentProgressWeight > 0 ? `${currentProgress.toFixed(1)}%` : 'No grades'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {submittedAssessments.length} submitted{pendingWeight > 0 ? `, ${pendingWeight.toFixed(0)}% pending` : ''}
+                          {submittedAssessments.length} done{pendingWeight > 0 ? `, ${pendingWeight.toFixed(0)}% left` : ''}
                         </p>
                       </div>
                       {goal && moduleGoals[module.id] && (
@@ -788,18 +787,18 @@ export default function Grades() {
             </CardHeader>
             <CardContent>
               <p className="text-xs text-blue-800 mb-3">
-                Use AI to analyze your grades and get recommendations
+                Use AI to analyze your progress
               </p>
               <Button 
                 size="sm" 
                 variant="outline" 
                 className="w-full text-xs"
                 onClick={() => {
-                  toast.info('AI Advisor feature coming soon! Navigate to /advisor page');
+                  toast.info('AI Advisor feature coming soon!');
                 }}
               >
                 <Zap className="h-3 w-3 mr-1" />
-                Get AI Insights
+                Get Insights
               </Button>
             </CardContent>
           </Card>
@@ -809,7 +808,7 @@ export default function Grades() {
         <div className="lg:col-span-3 space-y-4">
           {selectedModuleData && selectedModuleGoal && (
             <>
-              {/* Module Header and Goal */}
+              {/* Module Header */}
               <Card>
                 <CardHeader>
                   <div className="flex items-start justify-between gap-4">
@@ -819,20 +818,20 @@ export default function Grades() {
                         {selectedModuleData.module.code} • {selectedModuleData.module.credit_weight} credits
                       </p>
                     </div>
-                    <div className={`text-right p-4 rounded-lg ${getGradeBgColor(selectedModuleData.moduleAverage)}`}>
-                      <p className={`text-2xl font-bold ${getGradeColor(selectedModuleData.moduleAverage)}`}>
-                        {selectedModuleData.submittedWeight > 0 ? selectedModuleData.moduleAverage.toFixed(1) : 'N/A'}%
+                    <div className={`text-right p-4 rounded-lg ${getGradeBgColor(selectedModuleData.currentProgress)}`}>
+                      <p className={`text-2xl font-bold ${getGradeColor(selectedModuleData.currentProgress)}`}>
+                        {selectedModuleData.currentProgressWeight > 0 ? selectedModuleData.currentProgress.toFixed(1) : 'N/A'}%
                       </p>
-                      <p className="text-xs text-muted-foreground">Current Average</p>
+                      <p className="text-xs text-muted-foreground">Current Progress</p>
                       <p className="text-xs mt-1">
-                        {selectedModuleData.submittedAssessments.length}/{selectedModuleData.assessments.length} assessed
+                        {selectedModuleData.submittedAssessments.length}/{selectedModuleData.assessments.length} assessments
                       </p>
                     </div>
                   </div>
                 </CardHeader>
               </Card>
 
-              {/* Goal Achievement Card - DYNAMIC COLOR CODED */}
+              {/* Goal Achievement Card */}
               {moduleGoals[selectedModuleData.module.id] && (
                 <Card className={`border-2 ${getGoalStatusColor(selectedModuleGoal.status)}`}>
                   <CardContent className="pt-6">
@@ -860,14 +859,14 @@ export default function Grades() {
                         }`}>
                           <div className="flex items-baseline gap-2">
                             <p className={`text-sm font-semibold ${getGoalStatusTextColor(selectedModuleGoal.status)}`}>
-                              Required Average:
+                              Need on remaining:
                             </p>
                             <p className={`text-xl font-bold ${getGoalStatusTextColor(selectedModuleGoal.status)}`}>
                               {selectedModuleGoal.requiredAverage.toFixed(1)}%
                             </p>
                           </div>
                           <p className={`text-xs mt-1 ${getGoalStatusTextColor(selectedModuleGoal.status)} opacity-75`}>
-                            on {selectedModuleData.pendingWeight.toFixed(0)}% of remaining assessments
+                            on {selectedModuleData.pendingWeight.toFixed(0)}% remaining assessments
                           </p>
                         </div>
                       )}
