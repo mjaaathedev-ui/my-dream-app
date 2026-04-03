@@ -8,7 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, TrendingUp, Award, BarChart3, Filter, AlertCircle, Target, Zap, Brain } from 'lucide-react';
+import { Plus, Trash2, Edit2, TrendingUp, Award, BarChart3, Filter, AlertCircle, Target, Zap, Brain, X, Send } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface Module {
   id: string;
@@ -30,7 +32,7 @@ interface Assessment {
   user_id: string;
   submitted: boolean;
   created_at: string;
-  date?: string | null;
+  due_date?: string | null;
 }
 
 interface GradeData {
@@ -53,6 +55,11 @@ interface ModuleGoal {
   message: string;
 }
 
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export default function Grades() {
   const { user } = useAuth();
   const [modules, setModules] = useState<Module[]>([]);
@@ -61,13 +68,17 @@ export default function Grades() {
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [openModuleGoalDialog, setOpenModuleGoalDialog] = useState(false);
+  const [openAIDialog, setOpenAIDialog] = useState(false);
   const [editingAssessment, setEditingAssessment] = useState<Assessment | null>(null);
   const [moduleGoals, setModuleGoals] = useState<{ [key: string]: number }>({});
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [userMessage, setUserMessage] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
     type: 'exam',
-    date: '',
+    due_date: '',
     mark_achieved: '',
     max_mark: '100',
     weight_percent: '',
@@ -233,7 +244,7 @@ export default function Grades() {
           .update({
             name: formData.name,
             type: formData.type,
-            date: formData.date || null,
+            due_date: formData.due_date || null,
             mark_achieved: markValue,
             max_mark: maxMark,
             weight_percent: weightPercent,
@@ -250,7 +261,7 @@ export default function Grades() {
             user_id: user?.id,
             name: formData.name,
             type: formData.type,
-            date: formData.date || null,
+            due_date: formData.due_date || null,
             mark_achieved: markValue,
             max_mark: maxMark,
             weight_percent: weightPercent,
@@ -294,7 +305,7 @@ export default function Grades() {
     setFormData({
       name: '',
       type: 'exam',
-      date: '',
+      due_date: '',
       mark_achieved: '',
       max_mark: '100',
       weight_percent: '',
@@ -308,7 +319,7 @@ export default function Grades() {
     setFormData({
       name: assessment.name,
       type: assessment.type,
-      date: assessment.date || '',
+      due_date: assessment.due_date || '',
       mark_achieved: assessment.mark_achieved?.toString() || '',
       max_mark: assessment.max_mark.toString(),
       weight_percent: assessment.weight_percent.toString(),
@@ -485,6 +496,119 @@ export default function Grades() {
     }
   };
 
+  const prepareAIContext = () => {
+    const context = {
+      modules: gradesByModule.map(g => ({
+        name: g.module.name,
+        code: g.module.code,
+        credits: g.module.credit_weight,
+        currentProgress: g.currentProgress.toFixed(1),
+        submittedWeight: g.currentProgressWeight.toFixed(0),
+        pendingWeight: g.pendingWeight.toFixed(0),
+        submittedAssessments: g.submittedAssessments.length,
+        pendingAssessments: g.pendingAssessments.length,
+        targetGrade: moduleGoals[g.module.id] || null,
+      })),
+      goals: moduleGoalsData.map(g => ({
+        module: modules.find(m => m.id === g.moduleId)?.code,
+        targetGrade: g.targetGrade,
+        currentProgress: g.currentProgress.toFixed(1),
+        requiredAverage: g.requiredAverage.toFixed(1),
+        status: g.status,
+      })),
+      overallProgress: overallProgress.toFixed(1),
+      totalModules: modules.length,
+      totalAssessments: assessments.length,
+      submittedAssessments: assessments.filter(a => a.submitted).length,
+    };
+
+    return context;
+  };
+
+  const handleAIChat = async () => {
+    if (!userMessage.trim()) return;
+
+    const newUserMessage: ChatMessage = {
+      role: 'user',
+      content: userMessage,
+    };
+
+    setChatMessages(prev => [...prev, newUserMessage]);
+    setUserMessage('');
+    setAiLoading(true);
+
+    try {
+      const context = prepareAIContext();
+      
+      const systemPrompt = `You are an academic advisor AI helping a student track their grades and achieve their academic goals. 
+
+Here's the student's current academic data:
+${JSON.stringify(context, null, 2)}
+
+Provide helpful, encouraging, and actionable advice. Be specific about which modules need attention, suggest study strategies, and help them understand what they need to achieve their goals. Keep responses concise and practical.`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages: [
+            ...chatMessages.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+            })),
+            {
+              role: 'user',
+              content: userMessage,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get AI response');
+      }
+
+      const data = await response.json();
+      const assistantMessage = data.content.find((c: any) => c.type === 'text')?.text || 'Sorry, I could not generate a response.';
+
+      const newAssistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: assistantMessage,
+      };
+
+      setChatMessages(prev => [...prev, newAssistantMessage]);
+    } catch (error: any) {
+      console.error('AI Chat Error:', error);
+      toast.error('Failed to get AI response. Please try again.');
+      
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: 'Sorry, I encountered an error. Please try asking your question again.',
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const openAIAdvisor = () => {
+    setOpenAIDialog(true);
+    
+    if (chatMessages.length === 0) {
+      const welcomeMessage: ChatMessage = {
+        role: 'assistant',
+        content: `Hi! I'm your AI academic advisor. I can help you with:\n\n• Understanding your current academic progress\n• Strategies to achieve your target grades\n• Study recommendations for specific modules\n• Planning for upcoming assessments\n• Analyzing your strengths and areas for improvement\n\nWhat would you like to know about your grades?`,
+      };
+      setChatMessages([welcomeMessage]);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6 space-y-6">
@@ -612,8 +736,8 @@ export default function Grades() {
                     <label className="text-sm font-medium">Date <span className="text-muted-foreground font-normal">(optional)</span></label>
                     <Input 
                       type="date" 
-                      value={formData.date} 
-                      onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))} 
+                      value={formData.due_date} 
+                      onChange={(e) => setFormData(prev => ({ ...prev, due_date: e.target.value }))} 
                     />
                   </div>
                 </div>
@@ -662,6 +786,75 @@ export default function Grades() {
           </Dialog>
         </div>
       </div>
+
+      {/* AI Advisor Dialog */}
+      <Dialog open={openAIDialog} onOpenChange={setOpenAIDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Brain className="h-5 w-5 text-primary" />
+              AI Academic Advisor
+            </DialogTitle>
+          </DialogHeader>
+          
+          <ScrollArea className="flex-1 pr-4">
+            <div className="space-y-4 pb-4">
+              {chatMessages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[80%] rounded-lg p-3 ${
+                      message.role === 'user'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted'
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  </div>
+                </div>
+              ))}
+              
+              {aiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-muted rounded-lg p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-2 bg-primary rounded-full animate-pulse" />
+                      <div className="h-2 w-2 bg-primary rounded-full animate-pulse delay-100" />
+                      <div className="h-2 w-2 bg-primary rounded-full animate-pulse delay-200" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+          
+          <div className="flex gap-2 pt-4 border-t">
+            <Textarea
+              value={userMessage}
+              onChange={(e) => setUserMessage(e.target.value)}
+              placeholder="Ask about your grades, study strategies, or goal planning..."
+              className="min-h-[60px] resize-none"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleAIChat();
+                }
+              }}
+              disabled={aiLoading}
+            />
+            <Button 
+              onClick={handleAIChat} 
+              disabled={!userMessage.trim() || aiLoading}
+              size="icon"
+              className="h-[60px] w-[60px]"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
@@ -795,18 +988,16 @@ export default function Grades() {
             </CardHeader>
             <CardContent>
               <p className="text-xs text-blue-800 mb-3">
-                Use AI to analyze your progress
+                Get personalized insights and strategies to achieve your goals
               </p>
               <Button 
                 size="sm" 
                 variant="outline" 
                 className="w-full text-xs"
-                onClick={() => {
-                  toast.info('AI Advisor feature coming soon!');
-                }}
+                onClick={openAIAdvisor}
               >
                 <Zap className="h-3 w-3 mr-1" />
-                Get Insights
+                Chat with AI Advisor
               </Button>
             </CardContent>
           </Card>
@@ -912,9 +1103,9 @@ export default function Grades() {
                                       {assessment.type}
                                     </span>
                                     <span className="text-xs text-muted-foreground">Weight: {assessment.weight_percent}%</span>
-                                    {assessment.date && (
+                                    {assessment.due_date && (
                                       <span className="text-xs text-muted-foreground">
-                                        • Date: {new Date(assessment.date).toLocaleDateString()}
+                                        • Date: {new Date(assessment.due_date).toLocaleDateString()}
                                       </span>
                                     )}
                                     <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-0.5 rounded ml-auto">
@@ -976,9 +1167,9 @@ export default function Grades() {
                                     {assessment.type}
                                   </span>
                                   <span className="text-xs text-muted-foreground">Weight: {assessment.weight_percent}%</span>
-                                  {assessment.date && (
+                                  {assessment.due_date && (
                                     <span className="text-xs text-muted-foreground">
-                                      • Date: {new Date(assessment.date).toLocaleDateString()}
+                                      • Date: {new Date(assessment.due_date).toLocaleDateString()}
                                     </span>
                                   )}
                                   <span className="text-xs font-medium text-amber-600 bg-amber-200 px-2 py-0.5 rounded ml-auto">
