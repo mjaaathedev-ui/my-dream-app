@@ -284,8 +284,8 @@ export default function Advisor() {
     noKeyboard: true,
   });
 
-  const sendMessage = async (text: string) => {
-    if (!user || !text.trim() || loading) return;
+  const sendMessage = async (text: string, force = false) => {
+    if (!user || !text.trim() || (!force && loading)) return;
     const userMsg: Message = { role: 'user', content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
