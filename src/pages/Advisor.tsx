@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Bot, Send, Upload, FileText, Loader2, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useDropzone } from 'react-dropzone';
-import { buildUserContext, buildModuleContext } from '@/lib/ai-context';
+import { buildFullAppContext, buildModuleContext } from '@/lib/ai-context';
 import type { Module, UploadedFile, AIConversation } from '@/types/database';
 
 const SUGGESTED_PROMPTS = [
@@ -26,7 +26,6 @@ type Message = { role: 'user' | 'assistant'; content: string };
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 // ── localStorage persistence helpers ────────────────────────────────────────
-// These ensure conversations survive tab switches, browser minimise, etc.
 const LS_MSGS   = 'studyos_advisor_messages';
 const LS_MOD    = 'studyos_advisor_module';
 const LS_CONV   = 'studyos_advisor_conv_id';
@@ -46,7 +45,6 @@ const ls_msgs  = (v: Message[])      => { try { localStorage.setItem(LS_MSGS, JS
 const ls_mod   = (v: string)         => { try { localStorage.setItem(LS_MOD, v); } catch {} };
 const ls_conv  = (v: string | null)  => { try { v ? localStorage.setItem(LS_CONV, v) : localStorage.removeItem(LS_CONV); } catch {} };
 const ls_clear = ()                  => { localStorage.removeItem(LS_MSGS); localStorage.removeItem(LS_CONV); };
-// ────────────────────────────────────────────────────────────────────────────
 
 async function streamChat({
   messages, context, accessToken, onDelta, onDone, onToolResults,
@@ -105,7 +103,6 @@ async function streamChat({
         } catch { buf = line + '\n' + buf; break; }
       }
     }
-    // flush remainder
     for (let raw of buf.split('\n')) {
       if (!raw || !raw.startsWith('data: ')) continue;
       const json = raw.slice(6).trim();
@@ -129,14 +126,13 @@ export default function Advisor() {
   const [loading,  setLoading]  = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // ── Hydrate from localStorage (survives tab switches) ─────────────────────
+  // ── Hydrate from localStorage ─────────────────────────────────────────────
   const boot = ls_load();
   const [messages,        _setMessages]  = useState<Message[]>(boot.messages);
   const [selectedModuleId, _setModuleId] = useState<string>(boot.moduleId);
   const [conversationId,  _setConvId]    = useState<string | null>(boot.conversationId);
   const [input, setInput] = useState('');
 
-  // Setters that write through to localStorage
   const setMessages = useCallback((upd: Message[] | ((p: Message[]) => Message[])) => {
     _setMessages(prev => {
       const next = typeof upd === 'function' ? upd(prev) : upd;
@@ -146,7 +142,6 @@ export default function Advisor() {
   }, []);
   const setSelectedModuleId = useCallback((id: string) => { _setModuleId(id); ls_mod(id); }, []);
   const setConversationId   = useCallback((id: string | null) => { _setConvId(id); ls_conv(id); }, []);
-  // ─────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!user) return;
@@ -243,8 +238,11 @@ export default function Advisor() {
       const { data: { session } } = await supabase.auth.getSession();
       const accessToken           = session?.access_token || '';
 
-      let context = await buildUserContext(user.id, profile);
-      if (selectedModuleId) context += '\n' + await buildModuleContext(user.id, selectedModuleId);
+      // Full app context — same source of truth for all AI features
+      let context = await buildFullAppContext(user.id, profile);
+      if (selectedModuleId) {
+        context += '\n' + await buildModuleContext(user.id, selectedModuleId);
+      }
 
       let assistantSoFar = '';
 
@@ -291,7 +289,6 @@ export default function Advisor() {
     if (conversationId) await supabase.from('ai_conversations').delete().eq('id', conversationId);
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-[calc(100vh-48px)] md:h-screen animate-fade-in" {...getRootProps()}>
       <input {...getInputProps()} />
@@ -323,7 +320,6 @@ export default function Advisor() {
           </SelectContent>
         </Select>
 
-        {/* Upload */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-medium text-muted-foreground">Upload Documents</h3>
@@ -353,7 +349,8 @@ export default function Advisor() {
           <p className="font-medium text-muted-foreground">Always in context:</p>
           <p>Goal: {profile?.career_goal || 'Not set'}</p>
           <p>Target: {profile?.target_average}%</p>
-          <p>{selectedModuleId ? 'Module files & notes included' : 'All modules & data included'}</p>
+          <p>All modules, grades, study sessions, timetable & goals</p>
+          {selectedModuleId && <p className="text-primary">+ focused module files</p>}
         </div>
 
         <div className="flex-1" />
@@ -367,7 +364,6 @@ export default function Advisor() {
 
       {/* Chat */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Mobile header */}
         <div className="lg:hidden p-3 border-b border-border flex gap-2">
           <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
             <SelectTrigger className="flex-1"><SelectValue placeholder="All modules" /></SelectTrigger>
@@ -383,7 +379,6 @@ export default function Advisor() {
           )}
         </div>
 
-        {/* Messages area */}
         <div className="flex-1 overflow-auto p-4 space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center">
@@ -392,7 +387,7 @@ export default function Advisor() {
               </div>
               <h2 className="text-lg font-semibold mb-1">AI Advisor</h2>
               <p className="text-sm text-muted-foreground mb-2 max-w-[400px]">
-                I have full context of your profile, modules, grades, study sessions, and uploaded materials.
+                I have full context of your profile, modules, grades, study sessions, timetable, goals, and uploaded materials.
               </p>
               <p className="text-xs text-muted-foreground mb-6 max-w-[400px]">
                 I can also <strong>add modules, assessments, goals, timetable entries, and log study sessions</strong> — just ask!
@@ -410,9 +405,7 @@ export default function Advisor() {
 
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[600px] rounded-xl px-4 py-3 text-sm ${
-                msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-accent'
-              }`}>
+              <div className={`max-w-[600px] rounded-xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-accent'}`}>
                 {msg.role === 'assistant'
                   ? <div className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
                   : msg.content}
@@ -434,13 +427,12 @@ export default function Advisor() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Input bar */}
         <div className="p-4 border-t border-border">
           <form onSubmit={e => { e.preventDefault(); sendMessage(input); }} className="flex gap-2">
             <Input
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder={selectedModuleId ? 'Ask about your studies, or tell me what to add...' : 'Select a module or ask a general question...'}
+              placeholder={selectedModuleId ? 'Ask about your studies, or tell me what to add...' : 'Ask anything — I have full context of your entire app...'}
               disabled={loading}
               className="flex-1"
             />

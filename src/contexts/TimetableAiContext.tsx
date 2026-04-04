@@ -34,6 +34,7 @@ export function formatTimetableState(
 export function buildTimetableSystemPrompt(
   entries: TimetableEntry[],
   modules: Module[],
+  fullAppContext?: string,  // ← full app context passed in from the page
 ): string {
   const state = formatTimetableState(entries, modules);
   const moduleList =
@@ -43,12 +44,14 @@ export function buildTimetableSystemPrompt(
 
   return `You are an intelligent timetable assistant embedded in a student study app.
 Your job is to help the student manage their weekly timetable through natural conversation.
+You have full visibility into all app data (grades, study sessions, goals, assessments) so you can make smart scheduling decisions.
 
 You can:
 - Add one-time entries (specific date) or recurring entries (day of week)
 - Delete entries by ID or by description
 - Answer questions about the student's schedule
-- Suggest study slots based on free time
+- Suggest study slots based on free time, upcoming assessments, and workload
+- Consider the student's grades and goals when suggesting study priorities
 
 ALWAYS respond with a JSON object. No markdown, no prose — only JSON.
 
@@ -95,11 +98,13 @@ Rules:
 - If information is missing, set action="chat", error=true, and ask in "message"
 - Never invent IDs — only use IDs from the timetable state below
 - If deleting by description, find the matching entry in the state and use its ID
+- When suggesting study slots, consider the student's upcoming assessments and current grades
 
 Available modules:
 ${moduleList}
 
-${state}`;
+${state}
+${fullAppContext ? `\n=== FULL STUDENT CONTEXT (for smart scheduling) ===\n${fullAppContext}` : ''}`;
 }
 
 export interface TimetableAIResponse {
