@@ -190,6 +190,30 @@ export async function buildFullAppContext(userId: string, profile: UserProfile |
     }
   }
 
+  // ── Tasks ─────────────────────────────────────────────────────────────────
+  const { data: tasksData } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('user_id', userId);
+
+  if (tasksData && tasksData.length > 0) {
+    const activeTasks = (tasksData as any[]).filter(t => t.status !== 'done');
+    const doneTasks = (tasksData as any[]).filter(t => t.status === 'done');
+    if (activeTasks.length > 0) {
+      parts.push(`\n=== ACTIVE TASKS ===`);
+      for (const t of activeTasks) {
+        const mod = mods.find(m => m.id === t.module_id);
+        const statusLabel = t.status === 'not_started' ? 'Not started' : t.status === 'in_progress' ? 'In progress' : 'Almost done';
+        const dueStr = t.due_date ? `, due ${format(new Date(t.due_date), 'MMM d yyyy')}` : '';
+        const timeStr = t.time_logged_minutes > 0 ? `, ${Math.round(t.time_logged_minutes)}min logged` : '';
+        parts.push(`- ${t.title} [${mod?.name || 'Unknown'}] — ${statusLabel}${dueStr}${timeStr}`);
+      }
+    }
+    if (doneTasks.length > 0) {
+      parts.push(`Completed tasks: ${doneTasks.length}`);
+    }
+  }
+
   // ── Uploaded study materials ─────────────────────────────────────────────
   const { data: files } = await supabase
     .from('uploaded_files')

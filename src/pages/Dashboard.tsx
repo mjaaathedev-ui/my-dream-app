@@ -336,7 +336,17 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* Quick actions */}
+      {/* Tasks summary widget */}
+      <Card className="border-border shadow-sm cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => navigate('/tasks')}>
+        <CardContent className="p-4 flex items-center gap-3">
+          <CheckSquare className="h-5 w-5 text-primary shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">{tasksDue > 0 ? `${tasksDue} active task${tasksDue !== 1 ? 's' : ''}` : 'No active tasks'}</p>
+            <p className="text-xs text-muted-foreground">Tap to view or create tasks</p>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Button variant="outline" className="h-auto py-3 px-4 justify-start gap-2" onClick={() => navigate('/study')}>
           <Timer className="h-4 w-4 text-primary" />
