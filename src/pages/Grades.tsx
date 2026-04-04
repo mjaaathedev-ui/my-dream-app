@@ -232,13 +232,21 @@ export default function Grades() {
     try {
       const existingGoal = moduleGoals[moduleGoalForm.moduleId];
       if (existingGoal !== undefined) {
-        const { error } = await supabase.from('module_goals')
-          .update({ target_grade: moduleGoalForm.targetGrade })
-          .eq('module_id', moduleGoalForm.moduleId).eq('user_id', user?.id);
+        const { error } = await supabase.from('goals')
+          .update({ target_value: moduleGoalForm.targetGrade })
+          .eq('description', moduleGoalForm.moduleId)
+          .eq('user_id', user?.id || '')
+          .eq('type', 'module');
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('module_goals')
-          .insert({ user_id: user?.id, module_id: moduleGoalForm.moduleId, target_grade: moduleGoalForm.targetGrade });
+        const { error } = await supabase.from('goals')
+          .insert({
+            user_id: user?.id || '',
+            type: 'module',
+            title: `Module Goal: ${modules.find(m => m.id === moduleGoalForm.moduleId)?.name || ''}`,
+            description: moduleGoalForm.moduleId,
+            target_value: moduleGoalForm.targetGrade,
+          });
         if (error) throw error;
       }
       setModuleGoals(prev => ({ ...prev, [moduleGoalForm.moduleId]: moduleGoalForm.targetGrade }));

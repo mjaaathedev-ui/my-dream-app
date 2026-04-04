@@ -335,7 +335,7 @@ export default function Timetable() {
     const payload = { ...entry, user_id: user.id, recurring: entry.entry_type !== "once" };
     const conflict = detectConflict(entries, payload, false);
     if (conflict.hasConflict) { toast.warning(`Skipped "${entry.title}": ${conflict.message}`); return; }
-    const { data, error } = await supabase.from("timetable_entries").insert(payload).select().single();
+    const { data, error } = await supabase.from("timetable_entries").insert(payload as any).select().single();
     if (!error && data) setEntries((prev) => [...prev, data as TimetableEntry]);
   };
 
