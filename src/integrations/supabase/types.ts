@@ -427,6 +427,83 @@ export type Database = {
           },
         ]
       }
+      task_time_logs: {
+        Row: {
+          id: string
+          logged_at: string
+          minutes: number
+          note: string | null
+          task_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          logged_at?: string
+          minutes?: number
+          note?: string | null
+          task_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          logged_at?: string
+          minutes?: number
+          note?: string | null
+          task_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_time_logs_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          created_at: string
+          due_date: string | null
+          goal_id: string | null
+          id: string
+          module_id: string
+          notes: string | null
+          status: string
+          time_logged_minutes: number
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          due_date?: string | null
+          goal_id?: string | null
+          id?: string
+          module_id: string
+          notes?: string | null
+          status?: string
+          time_logged_minutes?: number
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          due_date?: string | null
+          goal_id?: string | null
+          id?: string
+          module_id?: string
+          notes?: string | null
+          status?: string
+          time_logged_minutes?: number
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       timetable_entries: {
         Row: {
           color: string | null
