@@ -103,9 +103,12 @@ export async function buildFullAppContext(userId: string, profile: UserProfile |
     parts.push(`\n=== TIMETABLE ===`);
     for (const e of timetable) {
       const mod = mods.find(m => m.id === e.module_id);
-      const schedule = e.entry_type === 'once' && e.specific_date
-        ? `Once on ${e.specific_date}`
-        : `Every ${DAY_NAMES[e.day_of_week]} (${e.recurrence ?? 'weekly'})`;
+      const entryType = (e as any).entry_type;
+      const specificDate = (e as any).specific_date;
+      const recurrence = (e as any).recurrence;
+      const schedule = entryType === 'once' && specificDate
+        ? `Once on ${specificDate}`
+        : `Every ${DAY_NAMES[e.day_of_week]} (${recurrence ?? 'weekly'})`;
       parts.push(`- ${e.title} | ${schedule} | ${e.start_time}–${e.end_time}${e.location ? ` @ ${e.location}` : ''}${mod ? ` [${mod.name}]` : ''}`);
     }
   }

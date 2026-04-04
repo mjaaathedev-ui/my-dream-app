@@ -211,12 +211,18 @@ export default function Grades() {
   const fetchModuleGoals = async () => {
     try {
       const { data, error } = await supabase
-        .from('module_goals')
-        .select('module_id, target_grade')
-        .eq('user_id', user?.id);
+        .from('goals')
+        .select('id, title, target_value, description')
+        .eq('user_id', user?.id || '')
+        .eq('type', 'module');
       if (error) throw error;
       const goalsMap: { [key: string]: number } = {};
-      data?.forEach(goal => { goalsMap[goal.module_id] = goal.target_grade; });
+      data?.forEach((goal: any) => {
+        // Use description to store module_id, target_value as target grade
+        if (goal.description && goal.target_value) {
+          goalsMap[goal.description] = goal.target_value;
+        }
+      });
       setModuleGoals(goalsMap);
     } catch {}
   };
@@ -226,13 +232,21 @@ export default function Grades() {
     try {
       const existingGoal = moduleGoals[moduleGoalForm.moduleId];
       if (existingGoal !== undefined) {
-        const { error } = await supabase.from('module_goals')
-          .update({ target_grade: moduleGoalForm.targetGrade })
-          .eq('module_id', moduleGoalForm.moduleId).eq('user_id', user?.id);
+        const { error } = await supabase.from('goals')
+          .update({ target_value: moduleGoalForm.targetGrade })
+          .eq('description', moduleGoalForm.moduleId)
+          .eq('user_id', user?.id || '')
+          .eq('type', 'module');
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('module_goals')
-          .insert({ user_id: user?.id, module_id: moduleGoalForm.moduleId, target_grade: moduleGoalForm.targetGrade });
+        const { error } = await supabase.from('goals')
+          .insert({
+            user_id: user?.id || '',
+            type: 'module',
+            title: `Module Goal: ${modules.find(m => m.id === moduleGoalForm.moduleId)?.name || ''}`,
+            description: moduleGoalForm.moduleId,
+            target_value: moduleGoalForm.targetGrade,
+          });
         if (error) throw error;
       }
       setModuleGoals(prev => ({ ...prev, [moduleGoalForm.moduleId]: moduleGoalForm.targetGrade }));
