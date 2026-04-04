@@ -103,6 +103,7 @@ const App = () => (
                 <Route path="/exam" element={<Exam />} />
                 <Route path="/progress" element={<Progress />} />
                 <Route path="/goals" element={<Goals />} />
+                <Route path="/tasks" element={<Tasks />} />
                 <Route path="/settings" element={<Settings />} />
               </Route>
               <Route path="*" element={<NotFound />} />

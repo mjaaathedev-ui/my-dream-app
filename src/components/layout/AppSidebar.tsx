@@ -20,6 +20,7 @@ const navItems = [
   { title: 'Exam Mode', url: '/exam', icon: FileEdit },
   { title: 'Progress Hub', url: '/progress', icon: TrendingUp },
   { title: 'Goals', url: '/goals', icon: Target },
+  { title: 'Tasks', url: '/tasks', icon: CheckSquare },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
