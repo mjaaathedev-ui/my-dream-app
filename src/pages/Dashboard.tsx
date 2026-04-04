@@ -35,6 +35,14 @@ export default function Dashboard() {
       setAssessments((assessmentsRes.data || []) as Assessment[]);
       setSessions((sessionsRes.data || []) as StudySession[]);
       
+      
+      // Count active tasks due within 7 days
+      const allTasks = (tasksRes.data || []) as any[];
+      const weekFromNow = new Date(); weekFromNow.setDate(weekFromNow.getDate() + 7);
+      const activeDue = allTasks.filter((t: any) => t.status !== 'done' && t.due_date && new Date(t.due_date) <= weekFromNow).length;
+      const activeTotal = allTasks.filter((t: any) => t.status !== 'done').length;
+      setTasksDue(activeDue > 0 ? activeDue : activeTotal);
+
       const quotes = quotesRes.data as Quote[] || [];
       if (quotes.length > 0) {
         const dayIndex = new Date().getDate() % quotes.length;
