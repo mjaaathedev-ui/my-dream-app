@@ -1,15 +1,17 @@
 import React from 'react';
-import { Container, Jumbotron, Button } from 'react-bootstrap';
+import { Button } from '@/components/ui/button';
 
 const Index = () => {
   return (
-    <Container fluid>
-      <Jumbotron className="text-center">
-        <h1>Welcome to My Dream App!</h1>
-        <p>Your one-stop solution for all your needs.</p>
-        <Button variant="primary" href="/signup">Get Started</Button>
-      </Jumbotron>
-    </Container>
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-center space-y-4 p-8">
+        <h1 className="text-4xl font-bold text-foreground">Welcome to My Dream App!</h1>
+        <p className="text-muted-foreground text-lg">Your one-stop solution for all your needs.</p>
+        <Button asChild>
+          <a href="/signup">Get Started</a>
+        </Button>
+      </div>
+    </div>
   );
 };
 

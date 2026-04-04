@@ -1,13 +1,14 @@
 // chat-persistence.ts
 
 class ChatPersistence {
+    private storageType: string;
+
     constructor() {
         this.storageType = this.detectStorageType();
         this.init();
     }
 
-    // Detect the best storage type
-    detectStorageType() {
+    detectStorageType(): string {
         if (this.supportsLocalStorage()) {
             return 'localStorage';
         } else if (this.supportsIndexedDB()) {
@@ -17,7 +18,7 @@ class ChatPersistence {
         }
     }
 
-    supportsLocalStorage() {
+    supportsLocalStorage(): boolean {
         try {
             return 'localStorage' in window && window['localStorage'] !== null;
         } catch (e) {
@@ -25,14 +26,12 @@ class ChatPersistence {
         }
     }
 
-    supportsIndexedDB() {
+    supportsIndexedDB(): boolean {
         return 'indexedDB' in window;
     }
 
     init() {
-        // Load existing messages on init
         this.loadMessages();
-        // Add visibility listeners
         this.addVisibilityListeners();
     }
 
@@ -44,22 +43,22 @@ class ChatPersistence {
         });
     }
 
-    saveMessage(key, message) {
+    saveMessage(key: string, message: any) {
         const messages = this.getMessages();
         messages[key] = message;
         this.storeMessages(messages);
     }
 
-    getMessages() {
+    getMessages(): Record<string, any> {
         if (this.storageType === 'localStorage') {
-            return JSON.parse(localStorage.getItem('chatMessages')) || {};
+            return JSON.parse(localStorage.getItem('chatMessages') || '{}');
         } else if (this.storageType === 'indexedDB') {
-            // IndexedDB read logic
             return this.readFromIndexedDB();
         }
+        return {};
     }
 
-    storeMessages(messages) {
+    storeMessages(messages: Record<string, any>) {
         if (this.storageType === 'localStorage') {
             localStorage.setItem('chatMessages', JSON.stringify(messages));
         } else if (this.storageType === 'indexedDB') {
@@ -67,14 +66,11 @@ class ChatPersistence {
         }
     }
 
-    // Sample IndexedDB methods (these would need to be implemented properly)
-    saveToIndexedDB(messages) {
-        // Implementation for saving to IndexedDB
+    saveToIndexedDB(messages: Record<string, any>) {
         console.log('Saving to IndexedDB:', messages);
     }
 
-    readFromIndexedDB() {
-        // Implementation for reading from IndexedDB
+    readFromIndexedDB(): Record<string, any> {
         console.log('Reading from IndexedDB');
         return {};
     }
@@ -82,11 +78,8 @@ class ChatPersistence {
     loadMessages() {
         const messages = this.getMessages();
         console.log('Loaded messages:', messages);
-        // Logic to display messages in the chat UI
     }
 }
 
 const chatPersistence = new ChatPersistence();
-
-// Exporting the class for use in other modules
 export default chatPersistence;
