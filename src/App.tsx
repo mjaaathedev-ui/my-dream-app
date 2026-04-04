@@ -18,6 +18,7 @@ const Timetable = lazy(() => import("./pages/Timetable"));
 const Exam = lazy(() => import("./pages/Exam"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Goals = lazy(() => import("./pages/Goals"));
+const Tasks = lazy(() => import("./pages/Tasks"));
 const Settings = lazy(() => import("./pages/Settings"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
