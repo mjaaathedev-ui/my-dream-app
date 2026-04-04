@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [tasksDue, setTasksDue] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
