@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Label } from '@/components/ui/label';
@@ -17,17 +17,28 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
   Plus, CheckSquare, Clock, Play, Square, CalendarIcon,
-  Trash2, Timer, MoreHorizontal
+  Trash2, Timer, MoreHorizontal, Pencil, AlertCircle, ArrowUpDown
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger, DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { Module, Goal } from '@/types/database';
 
 /* ── Types ──────────────────────────────────────────────────────────────────── */
 
 type TaskStatus = 'not_started' | 'in_progress' | 'almost_done' | 'done';
+type SortOption = 'created' | 'due_date' | 'status' | 'title';
 
 interface Task {
   id: string;
@@ -52,6 +63,11 @@ interface TimeLog {
   logged_at: string;
 }
 
+interface TimerState {
+  taskId: string;
+  startTime: number;
+}
+
 const STATUS_META: Record<TaskStatus, { label: string; color: string; next: TaskStatus | null }> = {
   not_started:  { label: 'Not started',  color: 'bg-muted text-muted-foreground',       next: 'in_progress' },
   in_progress:  { label: 'In progress',  color: 'bg-primary/15 text-primary',            next: 'almost_done' },
@@ -64,6 +80,7 @@ const STATUS_ORDER: TaskStatus[] = ['not_started', 'in_progress', 'almost_done',
 /* ── Helpers ────────────────────────────────────────────────────────────────── */
 
 function formatMins(m: number) {
+  if (m < 1) return `${Math.round(m * 60)}s`;
   if (m < 60) return `${Math.round(m)}m`;
   const h = Math.floor(m / 60);
   const r = Math.round(m % 60);
@@ -79,19 +96,29 @@ export default function Tasks() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters
+  // Filters & Sorting
   const [filterModule, setFilterModule] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('active');
+  const [sortBy, setSortBy] = useState<SortOption>('created');
 
   // New task dialog
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newModuleId, setNewModuleId] = useState('');
-  const [newGoalId, setNewGoalId] = useState('');
+  const [newGoalId, setNewGoalId] = useState<string>('');
   const [newDueDate, setNewDueDate] = useState<Date | undefined>();
   const [newNotes, setNewNotes] = useState('');
 
-  // Timer state
+  // Edit task dialog
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editModuleId, setEditModuleId] = useState('');
+  const [editGoalId, setEditGoalId] = useState<string>('');
+  const [editDueDate, setEditDueDate] = useState<Date | undefined>();
+  const [editNotes, setEditNotes] = useState('');
+
+  // Timer state with persistence
   const [activeTimerTaskId, setActiveTimerTaskId] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -101,25 +128,57 @@ export default function Tasks() {
   const [logMinutes, setLogMinutes] = useState('');
   const [logNote, setLogNote] = useState('');
 
+  // Delete confirmation
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+
   /* ── Fetch ──────────────────────────────────────────────────────────────── */
 
   const fetchData = useCallback(async () => {
     if (!user) return;
-    const [tasksRes, modulesRes, goalsRes] = await Promise.all([
-      supabase.from('tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
-      supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false),
-      supabase.from('goals').select('*').eq('user_id', user.id).eq('achieved', false),
-    ]);
-    setTasks((tasksRes.data || []) as Task[]);
-    setModules((modulesRes.data || []) as Module[]);
-    setGoals((goalsRes.data || []) as Goal[]);
-    setLoading(false);
+    try {
+      const [tasksRes, modulesRes, goalsRes] = await Promise.all([
+        supabase.from('tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false),
+        supabase.from('goals').select('*').eq('user_id', user.id).eq('achieved', false),
+      ]);
+
+      if (tasksRes.error) throw tasksRes.error;
+      if (modulesRes.error) throw modulesRes.error;
+      if (goalsRes.error) throw goalsRes.error;
+
+      setTasks((tasksRes.data || []) as Task[]);
+      setModules((modulesRes.data || []) as Module[]);
+      setGoals((goalsRes.data || []) as Goal[]);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast.error('Failed to load tasks');
+      setLoading(false);
+    }
   }, [user]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  /* ── Timer logic ────────────────────────────────────────────────────────── */
+  /* ── Timer persistence & logic ──────────────────────────────────────────── */
 
+  // Load timer from localStorage on mount
+  useEffect(() => {
+    const savedTimer = localStorage.getItem('activeTaskTimer');
+    if (savedTimer) {
+      try {
+        const { taskId, startTime }: TimerState = JSON.parse(savedTimer);
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setActiveTimerTaskId(taskId);
+        setTimerSeconds(elapsed);
+      } catch (error) {
+        console.error('Error loading timer:', error);
+        localStorage.removeItem('activeTaskTimer');
+      }
+    }
+  }, []);
+
+  // Timer interval
   useEffect(() => {
     if (activeTimerTaskId) {
       timerRef.current = setInterval(() => setTimerSeconds(s => s + 1), 1000);
@@ -128,36 +187,63 @@ export default function Tasks() {
   }, [activeTimerTaskId]);
 
   const startTimer = (taskId: string) => {
-    if (activeTimerTaskId) stopTimer();
+    if (activeTimerTaskId) {
+      toast.error('Please stop the current timer first');
+      return;
+    }
+    const startTime = Date.now();
+    localStorage.setItem('activeTaskTimer', JSON.stringify({ taskId, startTime }));
     setActiveTimerTaskId(taskId);
     setTimerSeconds(0);
+    toast.success('Timer started');
   };
 
   const stopTimer = async () => {
     if (!activeTimerTaskId || !user) return;
-    const mins = Math.max(1, Math.round(timerSeconds / 60));
-    if (timerRef.current) clearInterval(timerRef.current);
 
-    // Insert time log
-    await supabase.from('task_time_logs').insert({
-      task_id: activeTimerTaskId,
-      user_id: user.id,
-      minutes: mins,
-      note: 'Timer session',
-    } as any);
-
-    // Update task total
-    const task = tasks.find(t => t.id === activeTimerTaskId);
-    if (task) {
-      await supabase.from('tasks').update({
-        time_logged_minutes: (task.time_logged_minutes || 0) + mins,
-      } as any).eq('id', activeTimerTaskId);
+    // Minimum 30 seconds to log
+    if (timerSeconds < 30) {
+      toast.warning('Timer session too short (minimum 30 seconds). Time not logged.');
+      setActiveTimerTaskId(null);
+      setTimerSeconds(0);
+      localStorage.removeItem('activeTaskTimer');
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
     }
 
-    toast.success(`Logged ${formatMins(mins)} to task`);
-    setActiveTimerTaskId(null);
-    setTimerSeconds(0);
-    fetchData();
+    const mins = timerSeconds / 60; // Allow decimal minutes
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    try {
+      // Insert time log
+      const { error: logError } = await supabase.from('task_time_logs').insert({
+        task_id: activeTimerTaskId,
+        user_id: user.id,
+        minutes: mins,
+        note: 'Timer session',
+      } as any);
+
+      if (logError) throw logError;
+
+      // Update task total
+      const task = tasks.find(t => t.id === activeTimerTaskId);
+      if (task) {
+        const { error: updateError } = await supabase.from('tasks').update({
+          time_logged_minutes: (task.time_logged_minutes || 0) + mins,
+        } as any).eq('id', activeTimerTaskId);
+
+        if (updateError) throw updateError;
+      }
+
+      toast.success(`Logged ${formatMins(mins)} to task`);
+      localStorage.removeItem('activeTaskTimer');
+      setActiveTimerTaskId(null);
+      setTimerSeconds(0);
+      fetchData();
+    } catch (error) {
+      console.error('Error stopping timer:', error);
+      toast.error('Failed to log time');
+    }
   };
 
   /* ── CRUD ───────────────────────────────────────────────────────────────── */
@@ -167,71 +253,212 @@ export default function Tasks() {
       toast.error('Title and module are required');
       return;
     }
-    const { error } = await supabase.from('tasks').insert({
-      user_id: user.id,
-      title: newTitle.trim(),
-      module_id: newModuleId,
-      goal_id: newGoalId || null,
-      due_date: newDueDate ? newDueDate.toISOString() : null,
-      notes: newNotes,
-    } as any);
-    if (error) { toast.error('Failed to create task'); return; }
-    toast.success('Task created');
-    setDialogOpen(false);
-    setNewTitle(''); setNewModuleId(''); setNewGoalId(''); setNewDueDate(undefined); setNewNotes('');
-    fetchData();
+
+    try {
+      const { error } = await supabase.from('tasks').insert({
+        user_id: user.id,
+        title: newTitle.trim(),
+        module_id: newModuleId,
+        goal_id: (!newGoalId || newGoalId === 'none') ? null : newGoalId, // FIX: Handle 'none' properly
+        due_date: newDueDate ? newDueDate.toISOString() : null,
+        notes: newNotes,
+      } as any);
+
+      if (error) throw error;
+
+      toast.success('Task created');
+      setDialogOpen(false);
+      setNewTitle(''); 
+      setNewModuleId(''); 
+      setNewGoalId(''); 
+      setNewDueDate(undefined); 
+      setNewNotes('');
+      fetchData();
+    } catch (error) {
+      console.error('Error creating task:', error);
+      toast.error('Failed to create task');
+    }
+  };
+
+  const openEditDialog = (task: Task) => {
+    setEditingTask(task);
+    setEditTitle(task.title);
+    setEditModuleId(task.module_id);
+    setEditGoalId(task.goal_id || 'none');
+    setEditDueDate(task.due_date ? new Date(task.due_date) : undefined);
+    setEditNotes(task.notes || '');
+    setEditDialogOpen(true);
+  };
+
+  const updateTask = async () => {
+    if (!editingTask || !editTitle.trim() || !editModuleId) {
+      toast.error('Title and module are required');
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from('tasks').update({
+        title: editTitle.trim(),
+        module_id: editModuleId,
+        goal_id: (!editGoalId || editGoalId === 'none') ? null : editGoalId,
+        due_date: editDueDate ? editDueDate.toISOString() : null,
+        notes: editNotes,
+      } as any).eq('id', editingTask.id);
+
+      if (error) throw error;
+
+      toast.success('Task updated');
+      setEditDialogOpen(false);
+      setEditingTask(null);
+      fetchData();
+    } catch (error) {
+      console.error('Error updating task:', error);
+      toast.error('Failed to update task');
+    }
   };
 
   const advanceStatus = async (task: Task) => {
     const meta = STATUS_META[task.status];
     if (!meta.next) return;
-    await supabase.from('tasks').update({ status: meta.next } as any).eq('id', task.id);
-    fetchData();
+
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ status: meta.next } as any)
+        .eq('id', task.id);
+
+      if (error) throw error;
+
+      toast.success(`Task moved to ${STATUS_META[meta.next].label}`);
+      fetchData();
+    } catch (error) {
+      console.error('Error advancing status:', error);
+      toast.error('Failed to update task status');
+    }
   };
 
   const setStatus = async (task: Task, status: TaskStatus) => {
-    await supabase.from('tasks').update({ status } as any).eq('id', task.id);
-    fetchData();
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ status } as any)
+        .eq('id', task.id);
+
+      if (error) throw error;
+
+      toast.success(`Status changed to ${STATUS_META[status].label}`);
+      fetchData();
+    } catch (error) {
+      console.error('Error setting status:', error);
+      toast.error('Failed to update task status');
+    }
   };
 
-  const deleteTask = async (id: string) => {
-    await supabase.from('tasks').delete().eq('id', id);
-    fetchData();
+  const confirmDelete = (id: string) => {
+    setTaskToDelete(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const deleteTask = async () => {
+    if (!taskToDelete) return;
+
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .delete()
+        .eq('id', taskToDelete);
+
+      if (error) throw error;
+
+      toast.success('Task deleted');
+      setDeleteDialogOpen(false);
+      setTaskToDelete(null);
+      fetchData();
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      toast.error('Failed to delete task');
+    }
   };
 
   const submitManualLog = async () => {
-    if (!logTaskId || !user || !logMinutes) return;
-    const mins = parseFloat(logMinutes);
-    if (isNaN(mins) || mins <= 0) { toast.error('Enter valid minutes'); return; }
-
-    await supabase.from('task_time_logs').insert({
-      task_id: logTaskId,
-      user_id: user.id,
-      minutes: mins,
-      note: logNote,
-    } as any);
-
-    const task = tasks.find(t => t.id === logTaskId);
-    if (task) {
-      await supabase.from('tasks').update({
-        time_logged_minutes: (task.time_logged_minutes || 0) + mins,
-      } as any).eq('id', logTaskId);
+    if (!logTaskId || !user || !logMinutes) {
+      toast.error('Please enter minutes');
+      return;
     }
 
-    toast.success(`Logged ${formatMins(mins)}`);
-    setLogTaskId(null); setLogMinutes(''); setLogNote('');
-    fetchData();
+    const mins = parseFloat(logMinutes);
+    if (isNaN(mins) || mins <= 0) { 
+      toast.error('Enter valid minutes'); 
+      return; 
+    }
+
+    try {
+      // Insert time log
+      const { error: logError } = await supabase.from('task_time_logs').insert({
+        task_id: logTaskId,
+        user_id: user.id,
+        minutes: mins,
+        note: logNote,
+      } as any);
+
+      if (logError) throw logError;
+
+      // Update task total
+      const task = tasks.find(t => t.id === logTaskId);
+      if (task) {
+        const { error: updateError } = await supabase.from('tasks').update({
+          time_logged_minutes: (task.time_logged_minutes || 0) + mins,
+        } as any).eq('id', logTaskId);
+
+        if (updateError) throw updateError;
+      }
+
+      toast.success(`Logged ${formatMins(mins)}`);
+      setLogTaskId(null); 
+      setLogMinutes(''); 
+      setLogNote('');
+      fetchData();
+    } catch (error) {
+      console.error('Error logging time:', error);
+      toast.error('Failed to log time');
+    }
   };
 
-  /* ── Filtered tasks ─────────────────────────────────────────────────────── */
+  /* ── Filtered & sorted tasks ────────────────────────────────────────────── */
 
   const filtered = useMemo(() => {
-    let list = tasks;
-    if (filterModule !== 'all') list = list.filter(t => t.module_id === filterModule);
-    if (filterStatus === 'active') list = list.filter(t => t.status !== 'done');
-    else if (filterStatus !== 'all') list = list.filter(t => t.status === filterStatus);
+    let list = [...tasks];
+
+    // Apply filters
+    if (filterModule !== 'all') {
+      list = list.filter(t => t.module_id === filterModule);
+    }
+    if (filterStatus === 'active') {
+      list = list.filter(t => t.status !== 'done');
+    } else if (filterStatus !== 'all') {
+      list = list.filter(t => t.status === filterStatus);
+    }
+
+    // Apply sorting
+    if (sortBy === 'due_date') {
+      list.sort((a, b) => {
+        if (!a.due_date && !b.due_date) return 0;
+        if (!a.due_date) return 1;
+        if (!b.due_date) return -1;
+        return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+      });
+    } else if (sortBy === 'status') {
+      list.sort((a, b) => 
+        STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
+      );
+    } else if (sortBy === 'title') {
+      list.sort((a, b) => a.title.localeCompare(b.title));
+    } else {
+      // 'created' - already sorted from query
+    }
+
     return list;
-  }, [tasks, filterModule, filterStatus]);
+  }, [tasks, filterModule, filterStatus, sortBy]);
 
   /* ── Render ─────────────────────────────────────────────────────────────── */
 
@@ -309,8 +536,8 @@ export default function Tasks() {
         </Dialog>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3">
+      {/* Filters & Sorting */}
+      <div className="flex gap-3 flex-wrap">
         <Select value={filterModule} onValueChange={setFilterModule}>
           <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -324,6 +551,18 @@ export default function Tasks() {
             <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="active">Active</SelectItem>
             {STATUS_ORDER.map(s => <SelectItem key={s} value={s}>{STATUS_META[s].label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortOption)}>
+          <SelectTrigger className="w-[160px]">
+            <ArrowUpDown className="mr-2 h-4 w-4" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="created">Newest first</SelectItem>
+            <SelectItem value="due_date">Due date</SelectItem>
+            <SelectItem value="status">Status</SelectItem>
+            <SelectItem value="title">Title (A-Z)</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -354,6 +593,7 @@ export default function Tasks() {
                       onClick={() => advanceStatus(task)}
                       className={cn("mt-0.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer shrink-0", meta.color)}
                       title={meta.next ? `Advance to ${STATUS_META[meta.next].label}` : 'Completed'}
+                      aria-label={meta.next ? `Advance task to ${STATUS_META[meta.next].label}` : 'Task completed'}
                     >
                       {meta.label}
                     </button>
@@ -388,12 +628,25 @@ export default function Tasks() {
                         <span className="text-sm font-mono text-primary tabular-nums">
                           {Math.floor(timerSeconds / 60).toString().padStart(2, '0')}:{(timerSeconds % 60).toString().padStart(2, '0')}
                         </span>
-                        <Button size="icon" variant="destructive" className="h-7 w-7" onClick={stopTimer}>
+                        <Button 
+                          size="icon" 
+                          variant="destructive" 
+                          className="h-7 w-7" 
+                          onClick={stopTimer}
+                          aria-label="Stop timer"
+                        >
                           <Square className="h-3 w-3" />
                         </Button>
                       </div>
                     ) : (
-                      <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => startTimer(task.id)} title="Start timer">
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-7 w-7 shrink-0" 
+                        onClick={() => startTimer(task.id)} 
+                        title="Start timer"
+                        aria-label="Start timer for this task"
+                      >
                         <Play className="h-3.5 w-3.5" />
                       </Button>
                     )}
@@ -401,20 +654,30 @@ export default function Tasks() {
                     {/* Actions menu */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0">
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-7 w-7 shrink-0"
+                          aria-label="Task actions"
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEditDialog(task)}>
+                          <Pencil className="h-4 w-4 mr-2" /> Edit task
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {STATUS_ORDER.filter(s => s !== task.status).map(s => (
                           <DropdownMenuItem key={s} onClick={() => setStatus(task, s)}>
                             Set {STATUS_META[s].label}
                           </DropdownMenuItem>
                         ))}
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => { setLogTaskId(task.id); setLogMinutes(''); setLogNote(''); }}>
                           <Timer className="h-4 w-4 mr-2" /> Log time manually
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive" onClick={() => deleteTask(task.id)}>
+                        <DropdownMenuItem className="text-destructive" onClick={() => confirmDelete(task.id)}>
                           <Trash2 className="h-4 w-4 mr-2" /> Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -426,6 +689,57 @@ export default function Tasks() {
           })}
         </div>
       )}
+
+      {/* Edit task dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Task</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Title *</Label>
+              <Input value={editTitle} onChange={e => setEditTitle(e.target.value)} placeholder="Read Chapter 5" />
+            </div>
+            <div>
+              <Label>Module *</Label>
+              <Select value={editModuleId} onValueChange={setEditModuleId}>
+                <SelectTrigger><SelectValue placeholder="Select module" /></SelectTrigger>
+                <SelectContent>
+                  {modules.map(m => <SelectItem key={m.id} value={m.id}>{m.name} ({m.code})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Goal (optional)</Label>
+              <Select value={editGoalId} onValueChange={setEditGoalId}>
+                <SelectTrigger><SelectValue placeholder="No goal" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No goal</SelectItem>
+                  {goals.map(g => <SelectItem key={g.id} value={g.id}>{g.title}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Due date (optional)</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !editDueDate && "text-muted-foreground")}>
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {editDueDate ? format(editDueDate, 'PPP') : 'Pick a date'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar mode="single" selected={editDueDate} onSelect={setEditDueDate} initialFocus className="p-3 pointer-events-auto" />
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div>
+              <Label>Notes (optional)</Label>
+              <Textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Any details…" rows={2} />
+            </div>
+            <Button onClick={updateTask} className="w-full">Update Task</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Manual time log dialog */}
       <Dialog open={!!logTaskId} onOpenChange={open => { if (!open) setLogTaskId(null); }}>
@@ -444,6 +758,27 @@ export default function Tasks() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              Delete Task?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the task and all its time logs.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setTaskToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={deleteTask} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
