@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, subDays, startOfDay, differenceInDays, isAfter } from 'date-fns';
-import { Target, TrendingUp, Timer, Flame, BookOpen, Calendar, Bot, Plus, Clock } from 'lucide-react';
+import { Target, TrendingUp, Timer, Flame, BookOpen, Calendar, Bot, Plus, Clock, CheckSquare } from 'lucide-react';
 import type { Assessment, StudySession, Module, Quote } from '@/types/database';
 
 export default function Dashboard() {
