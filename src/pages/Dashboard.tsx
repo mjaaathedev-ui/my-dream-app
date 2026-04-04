@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, subDays, startOfDay, differenceInDays, isAfter } from 'date-fns';
-import { Target, TrendingUp, Timer, Flame, BookOpen, Calendar, Bot, Plus, Clock } from 'lucide-react';
+import { Target, TrendingUp, Timer, Flame, BookOpen, Calendar, Bot, Plus, Clock, CheckSquare } from 'lucide-react';
 import type { Assessment, StudySession, Module, Quote } from '@/types/database';
 
 export default function Dashboard() {
@@ -18,21 +18,31 @@ export default function Dashboard() {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [tasksDue, setTasksDue] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
     const fetchData = async () => {
-      const [modulesRes, assessmentsRes, sessionsRes, quotesRes] = await Promise.all([
+      const [modulesRes, assessmentsRes, sessionsRes, quotesRes, tasksRes] = await Promise.all([
         supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false),
         supabase.from('assessments').select('*').eq('user_id', user.id),
         supabase.from('study_sessions').select('*').eq('user_id', user.id),
         supabase.from('quotes').select('*').eq('career_field', profile?.career_field || 'Engineering'),
+        supabase.from('tasks').select('id, status, due_date').eq('user_id', user.id),
       ]);
       setModules((modulesRes.data || []) as Module[]);
       setAssessments((assessmentsRes.data || []) as Assessment[]);
       setSessions((sessionsRes.data || []) as StudySession[]);
       
+      
+      // Count active tasks due within 7 days
+      const allTasks = (tasksRes.data || []) as any[];
+      const weekFromNow = new Date(); weekFromNow.setDate(weekFromNow.getDate() + 7);
+      const activeDue = allTasks.filter((t: any) => t.status !== 'done' && t.due_date && new Date(t.due_date) <= weekFromNow).length;
+      const activeTotal = allTasks.filter((t: any) => t.status !== 'done').length;
+      setTasksDue(activeDue > 0 ? activeDue : activeTotal);
+
       const quotes = quotesRes.data as Quote[] || [];
       if (quotes.length > 0) {
         const dayIndex = new Date().getDate() % quotes.length;
@@ -326,7 +336,17 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* Quick actions */}
+      {/* Tasks summary widget */}
+      <Card className="border-border shadow-sm cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => navigate('/tasks')}>
+        <CardContent className="p-4 flex items-center gap-3">
+          <CheckSquare className="h-5 w-5 text-primary shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">{tasksDue > 0 ? `${tasksDue} active task${tasksDue !== 1 ? 's' : ''}` : 'No active tasks'}</p>
+            <p className="text-xs text-muted-foreground">Tap to view or create tasks</p>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Button variant="outline" className="h-auto py-3 px-4 justify-start gap-2" onClick={() => navigate('/study')}>
           <Timer className="h-4 w-4 text-primary" />

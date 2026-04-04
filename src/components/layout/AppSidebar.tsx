@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, BookOpen, Bot, Timer, Calendar,
-  FileEdit, TrendingUp, Target, Settings, LogOut, ChevronLeft
+  FileEdit, TrendingUp, Target, Settings, LogOut, ChevronLeft, CheckSquare
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,6 +20,7 @@ const navItems = [
   { title: 'Exam Mode', url: '/exam', icon: FileEdit },
   { title: 'Progress Hub', url: '/progress', icon: TrendingUp },
   { title: 'Goals', url: '/goals', icon: Target },
+  { title: 'Tasks', url: '/tasks', icon: CheckSquare },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
