@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, BookOpen, Bot, Timer, Calendar,
-  FileEdit, TrendingUp, Target, Settings, LogOut, ChevronLeft
+  FileEdit, TrendingUp, Target, Settings, LogOut, ChevronLeft, CheckSquare
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
