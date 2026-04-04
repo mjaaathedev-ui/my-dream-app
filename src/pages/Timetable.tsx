@@ -219,7 +219,7 @@ export default function Timetable() {
       setEntries((prev) => prev.map((e) => (e.id === editEntry.id ? (data as TimetableEntry) : e)));
       toast.success("Entry updated");
     } else {
-      const { data, error } = await supabase.from("timetable_entries").insert(payload).select().single();
+      const { data, error } = await supabase.from("timetable_entries").insert(payload as any).select().single();
       if (error) { toast.error(error.message); return; }
       setEntries((prev) => [...prev, data as TimetableEntry]);
       toast.success("Entry added");
