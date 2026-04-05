@@ -89,13 +89,50 @@ const TOOLS = [
         properties: {
           title: { type: "string" },
           type: { type: "string", enum: ["class", "tutorial", "practical", "study", "personal", "assessment"] },
-          day_of_week: { type: "number", description: "0=Sunday, 1=Monday...6=Saturday" },
-          start_time: { type: "string", description: "HH:MM format" },
-          end_time: { type: "string", description: "HH:MM format" },
+          day_of_week: { type: "number", description: "0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday" },
+          start_time: { type: "string", description: "HH:MM 24-hour format" },
+          end_time: { type: "string", description: "HH:MM 24-hour format" },
           location: { type: "string" },
           module_name: { type: "string", description: "Optional module name to link" },
         },
         required: ["title", "type", "day_of_week", "start_time", "end_time"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_timetable_entry",
+      description: "Update an existing timetable entry. Find by title (and optionally day) then update fields.",
+      parameters: {
+        type: "object",
+        properties: {
+          current_title: { type: "string", description: "Current title of the entry to update" },
+          day_of_week: { type: "number", description: "Day to narrow search: 0=Monday...6=Sunday" },
+          new_title: { type: "string" },
+          new_type: { type: "string", enum: ["class", "tutorial", "practical", "study", "personal", "assessment"] },
+          new_day_of_week: { type: "number", description: "0=Monday...6=Sunday" },
+          new_start_time: { type: "string", description: "HH:MM 24-hour" },
+          new_end_time: { type: "string", description: "HH:MM 24-hour" },
+          new_location: { type: "string" },
+          module_name: { type: "string", description: "Module to link" },
+        },
+        required: ["current_title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_timetable_entry",
+      description: "Delete a timetable entry by title (and optionally day to narrow it down)",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the entry to delete" },
+          day_of_week: { type: "number", description: "Day to narrow search: 0=Monday...6=Sunday" },
+        },
+        required: ["title"],
       },
     },
   },
