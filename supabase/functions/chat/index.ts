@@ -564,7 +564,9 @@ Available actions via tools:
 - add_assessment: Add a test, assignment, exam to a module
 - log_mark: Record a grade for an assessment
 - add_goal: Create a goal
-- add_timetable_entry: Add to weekly timetable
+- add_timetable_entry: Add to weekly timetable (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun)
+- update_timetable_entry: Update an existing timetable entry (change time, day, title, location)
+- delete_timetable_entry: Remove a timetable entry
 - log_study_session: Log study time
 - bulk_create_from_document: Bulk create modules + assessments from uploaded documents
 - create_calendar_events: Add events to Google Calendar${hasGoogleCalendar ? ' (CONNECTED - use this when creating assessments with dates)' : ' (NOT connected)'}
