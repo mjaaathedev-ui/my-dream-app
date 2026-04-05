@@ -89,13 +89,50 @@ const TOOLS = [
         properties: {
           title: { type: "string" },
           type: { type: "string", enum: ["class", "tutorial", "practical", "study", "personal", "assessment"] },
-          day_of_week: { type: "number", description: "0=Sunday, 1=Monday...6=Saturday" },
-          start_time: { type: "string", description: "HH:MM format" },
-          end_time: { type: "string", description: "HH:MM format" },
+          day_of_week: { type: "number", description: "0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday" },
+          start_time: { type: "string", description: "HH:MM 24-hour format" },
+          end_time: { type: "string", description: "HH:MM 24-hour format" },
           location: { type: "string" },
           module_name: { type: "string", description: "Optional module name to link" },
         },
         required: ["title", "type", "day_of_week", "start_time", "end_time"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_timetable_entry",
+      description: "Update an existing timetable entry. Find by title (and optionally day) then update fields.",
+      parameters: {
+        type: "object",
+        properties: {
+          current_title: { type: "string", description: "Current title of the entry to update" },
+          day_of_week: { type: "number", description: "Day to narrow search: 0=Monday...6=Sunday" },
+          new_title: { type: "string" },
+          new_type: { type: "string", enum: ["class", "tutorial", "practical", "study", "personal", "assessment"] },
+          new_day_of_week: { type: "number", description: "0=Monday...6=Sunday" },
+          new_start_time: { type: "string", description: "HH:MM 24-hour" },
+          new_end_time: { type: "string", description: "HH:MM 24-hour" },
+          new_location: { type: "string" },
+          module_name: { type: "string", description: "Module to link" },
+        },
+        required: ["current_title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_timetable_entry",
+      description: "Delete a timetable entry by title (and optionally day to narrow it down)",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Title of the entry to delete" },
+          day_of_week: { type: "number", description: "Day to narrow search: 0=Monday...6=Sunday" },
+        },
+        required: ["title"],
       },
     },
   },
@@ -291,7 +328,41 @@ async function executeTool(
         module_id: moduleId,
       });
       if (error) return `Error: ${error.message}`;
-      return `✅ Timetable entry "${args.title}" added.`;
+      const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+      return `✅ Timetable entry "${args.title}" added on ${dayNames[args.day_of_week]} ${args.start_time}–${args.end_time}.`;
+    }
+    case "update_timetable_entry": {
+      const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+      let query = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.current_title}%`);
+      if (args.day_of_week !== undefined) query = query.eq("day_of_week", args.day_of_week);
+      const { data: entries } = await query;
+      if (!entries || entries.length === 0) return `❌ No timetable entry found matching "${args.current_title}".`;
+      const entry = entries[0];
+      const updates: any = {};
+      if (args.new_title) updates.title = args.new_title;
+      if (args.new_type) updates.type = args.new_type;
+      if (args.new_day_of_week !== undefined) updates.day_of_week = args.new_day_of_week;
+      if (args.new_start_time) updates.start_time = args.new_start_time;
+      if (args.new_end_time) updates.end_time = args.new_end_time;
+      if (args.new_location !== undefined) updates.location = args.new_location;
+      if (args.module_name) {
+        const mod = findModule(args.module_name);
+        if (mod) updates.module_id = mod.id;
+      }
+      if (Object.keys(updates).length === 0) return `⚠️ No changes specified for "${args.current_title}".`;
+      const { error } = await supabaseAdmin.from("timetable_entries").update(updates).eq("id", entry.id);
+      if (error) return `Error: ${error.message}`;
+      return `✅ Updated "${entry.title}"${updates.day_of_week !== undefined ? ` → ${dayNames[updates.day_of_week]}` : ''}${updates.start_time ? ` ${updates.start_time}–${updates.end_time || entry.end_time}` : ''}.`;
+    }
+    case "delete_timetable_entry": {
+      let query = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.title}%`);
+      if (args.day_of_week !== undefined) query = query.eq("day_of_week", args.day_of_week);
+      const { data: entries } = await query;
+      if (!entries || entries.length === 0) return `❌ No timetable entry found matching "${args.title}".`;
+      const entry = entries[0];
+      const { error } = await supabaseAdmin.from("timetable_entries").delete().eq("id", entry.id);
+      if (error) return `Error: ${error.message}`;
+      return `✅ Deleted timetable entry "${entry.title}".`;
     }
     case "log_study_session": {
       const mod = findModule(args.module_name);
@@ -493,7 +564,9 @@ Available actions via tools:
 - add_assessment: Add a test, assignment, exam to a module
 - log_mark: Record a grade for an assessment
 - add_goal: Create a goal
-- add_timetable_entry: Add to weekly timetable
+- add_timetable_entry: Add to weekly timetable (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun)
+- update_timetable_entry: Update an existing timetable entry (change time, day, title, location)
+- delete_timetable_entry: Remove a timetable entry
 - log_study_session: Log study time
 - bulk_create_from_document: Bulk create modules + assessments from uploaded documents
 - create_calendar_events: Add events to Google Calendar${hasGoogleCalendar ? ' (CONNECTED - use this when creating assessments with dates)' : ' (NOT connected)'}
