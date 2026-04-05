@@ -244,7 +244,6 @@ export default function Timetable() {
     setSyncing(false);
   };
 
-  // ── AI — now with full app context ─────────────────────────────────────────
   const sendAiMessage = useCallback(async () => {
     if (!aiInput.trim() || aiLoading || !user) return;
     const userMsg: ChatMessage = { role: "user", content: aiInput.trim() };
@@ -256,7 +255,6 @@ export default function Timetable() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
 
-      // Full app context so timetable AI knows about grades, goals, assessments
       const fullContext = await buildFullAppContext(user.id, profile);
       const systemPrompt = buildTimetableSystemPrompt(entries, modules, fullContext);
 
@@ -508,7 +506,7 @@ export default function Timetable() {
             <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">Sync</span>
           </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs bg-gradient-to-r from-violet-500/10 to-blue-500/10 border-violet-300 text-violet-700 hover:from-violet-500/20" onClick={() => setAiOpen(true)}>
+          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => setAiOpen(true)}>
             <Sparkles className="h-3 w-3" />
             <span className="hidden sm:inline">AI Assistant</span>
           </Button>
@@ -524,52 +522,83 @@ export default function Timetable() {
         {viewMode === "list" && <ListView />}
       </div>
 
-      {/* AI panel */}
+      {/* AI panel — clean neutral colors, same layout */}
       {aiOpen && (
-        <div className="fixed bottom-4 right-4 w-[360px] max-h-[520px] bg-background border border-border rounded-xl shadow-2xl flex flex-col z-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-gradient-to-r from-violet-600 to-blue-600">
-            <div className="flex items-center gap-2 text-white">
-              <Bot className="h-4 w-4" />
-              <span className="text-sm font-semibold">Timetable Assistant</span>
-              <span className="text-[10px] opacity-70">full context</span>
+        <div className="fixed bottom-4 right-4 w-[360px] max-h-[520px] bg-background border border-border rounded-xl shadow-xl flex flex-col z-50 overflow-hidden">
+          {/* Header — solid primary blue, white text */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-primary shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="h-7 w-7 rounded-full bg-white/20 flex items-center justify-center">
+                <Bot className="h-3.5 w-3.5 text-white" />
+              </div>
+              <div>
+                <span className="text-sm font-medium text-white">Timetable Assistant</span>
+                <span className="text-[10px] text-white/60 ml-2">full context</span>
+              </div>
             </div>
-            <button onClick={() => setAiOpen(false)} className="text-white/80 hover:text-white"><X className="h-4 w-4" /></button>
+            <button
+              onClick={() => setAiOpen(false)}
+              className="h-7 w-7 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors text-white/70 hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <div className="flex-1 overflow-auto p-3 space-y-2 bg-muted/20">
+
+          {/* Messages */}
+          <div className="flex-1 overflow-auto p-3 space-y-2 bg-background">
             {aiChat.length === 0 && (
               <div className="text-center py-6 space-y-2">
-                <Sparkles className="h-8 w-8 text-violet-400 mx-auto" />
-                <p className="text-sm font-medium">Ask me to manage your timetable</p>
+                <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center mx-auto">
+                  <Sparkles className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium text-foreground">Ask me to manage your timetable</p>
                 <p className="text-xs text-muted-foreground">I know your grades, goals, and upcoming assessments too</p>
-                <div className="flex flex-wrap gap-1.5 justify-center">
+                <div className="flex flex-wrap gap-1.5 justify-center pt-1">
                   {["Add Math every Monday 8–10", "Add exam on April 15th 9–12", "Clear my Fridays", "What's on tomorrow?", "Suggest study slots for my exam"].map((s) => (
-                    <button key={s} onClick={() => setAiInput(s)} className="text-[11px] px-2 py-1 rounded-full bg-muted border border-border hover:bg-accent transition-colors">{s}</button>
+                    <button
+                      key={s}
+                      onClick={() => setAiInput(s)}
+                      className="text-[11px] px-2.5 py-1 rounded-full bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors"
+                    >
+                      {s}
+                    </button>
                   ))}
                 </div>
               </div>
             )}
             {aiChat.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] text-xs px-3 py-2 rounded-xl ${msg.role === "user" ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-background border border-border rounded-bl-sm"}`}>
+                <div className={`max-w-[85%] text-xs px-3 py-2 rounded-2xl leading-relaxed ${
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground rounded-br-sm"
+                    : "bg-muted text-foreground rounded-bl-sm"
+                }`}>
                   {msg.content}
                 </div>
               </div>
             ))}
             {aiLoading && (
               <div className="flex justify-start">
-                <div className="bg-background border border-border rounded-xl rounded-bl-sm px-3 py-2 flex gap-1">
+                <div className="bg-muted rounded-2xl rounded-bl-sm px-3 py-2.5 flex gap-1">
                   {[0, 0.15, 0.3].map((d, i) => (
-                    <div key={i} className="h-1.5 w-1.5 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: `${d}s` }} />
+                    <div key={i} className="h-1.5 w-1.5 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: `${d}s` }} />
                   ))}
                 </div>
               </div>
             )}
             <div ref={chatEndRef} />
           </div>
+
+          {/* Input bar */}
           <div className="flex gap-2 p-3 border-t border-border bg-background">
-            <Input value={aiInput} onChange={(e) => setAiInput(e.target.value)}
+            <Input
+              value={aiInput}
+              onChange={(e) => setAiInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAiMessage(); } }}
-              placeholder="Ask about your timetable…" className="text-xs h-8" disabled={aiLoading} />
+              placeholder="Ask about your timetable…"
+              className="text-xs h-8"
+              disabled={aiLoading}
+            />
             <Button size="icon" className="h-8 w-8 shrink-0" onClick={sendAiMessage} disabled={!aiInput.trim() || aiLoading}>
               {aiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
             </Button>
