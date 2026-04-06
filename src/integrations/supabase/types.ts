@@ -611,6 +611,7 @@ export type Database = {
         Row: {
           career_field: string | null
           career_goal: string | null
+          checkin_interval_hours: number | null
           created_at: string
           daily_study_target_hours: number | null
           default_pomodoro_minutes: number | null
@@ -639,6 +640,7 @@ export type Database = {
         Insert: {
           career_field?: string | null
           career_goal?: string | null
+          checkin_interval_hours?: number | null
           created_at?: string
           daily_study_target_hours?: number | null
           default_pomodoro_minutes?: number | null
@@ -667,6 +669,7 @@ export type Database = {
         Update: {
           career_field?: string | null
           career_goal?: string | null
+          checkin_interval_hours?: number | null
           created_at?: string
           daily_study_target_hours?: number | null
           default_pomodoro_minutes?: number | null
