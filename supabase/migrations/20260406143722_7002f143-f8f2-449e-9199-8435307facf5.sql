@@ -1,0 +1,1 @@
+ALTER TABLE public.users_profile ADD COLUMN IF NOT EXISTS checkin_interval_hours numeric DEFAULT 6;
