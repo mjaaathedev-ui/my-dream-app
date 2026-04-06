@@ -38,6 +38,7 @@ export default function Settings() {
   // WhatsApp
   const [whatsappNumber, setWhatsappNumber] = useState(profile?.whatsapp_number || '');
   const [whatsappEnabled, setWhatsappEnabled] = useState(profile?.whatsapp_enabled || false);
+  const [checkinInterval, setCheckinInterval] = useState([profile?.checkin_interval_hours || 6]);
 
   const [saving, setSaving] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -158,6 +159,7 @@ export default function Settings() {
       timezone,
       whatsapp_number: whatsappNumber,
       whatsapp_enabled: whatsappEnabled,
+      checkin_interval_hours: checkinInterval[0],
       google_calendar_id: selectedCalendarId,
     }).eq('user_id', user.id);
     if (error) toast.error(error.message);
@@ -376,10 +378,15 @@ export default function Settings() {
             <Switch checked={whatsappEnabled} onCheckedChange={setWhatsappEnabled} />
           </div>
           {whatsappEnabled && (
-            <div className="space-y-2 p-3 bg-accent rounded-md">
+            <div className="space-y-3 p-3 bg-accent rounded-md">
+              <div className="space-y-2">
+                <Label className="text-xs">Check-in every: <span className="font-mono text-primary">{checkinInterval[0]}h</span></Label>
+                <Slider value={checkinInterval} onValueChange={setCheckinInterval} min={1} max={24} step={1} />
+                <p className="text-[10px] text-muted-foreground">You'll get a WhatsApp message every {checkinInterval[0]} hour{checkinInterval[0] !== 1 ? 's' : ''} with your study progress and upcoming assessments.</p>
+              </div>
               <p className="text-xs font-medium text-muted-foreground">Notification types:</p>
               <div className="space-y-2">
-                {['Daily check-in', 'Assessment reminders', 'Drift alerts', 'Streak celebrations', 'Weekly summary'].map(item => (
+                {['Study check-in', 'Assessment reminders', 'Drift alerts', 'Streak celebrations', 'Weekly summary'].map(item => (
                   <div key={item} className="flex items-center gap-2">
                     <Checkbox id={item} defaultChecked />
                     <label htmlFor={item} className="text-xs">{item}</label>
