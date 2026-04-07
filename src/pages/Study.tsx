@@ -76,8 +76,9 @@ export default function Study() {
           const elapsedSinceSnapshot = Math.floor((Date.now() - data.savedAt) / 1000);
           const remaining = data.timeLeft - elapsedSinceSnapshot;
           if (remaining > 0) {
-            startedAtRef.current   = new Date(data.startedAt);
-            pauseOffsetRef.current = data.pauseOffset || 0;
+            startedAtRef.current       = new Date(data.startedAt);
+            pauseOffsetRef.current     = data.pauseOffset || 0;
+            activeSessionIdRef.current = data.sessionId || null;
             setTimeLeft(remaining);
             setPhase('active');
             setSelectedModuleId(data.moduleId || '');
