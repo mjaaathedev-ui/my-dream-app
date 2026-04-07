@@ -309,14 +309,6 @@ export default function Study() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const getLiveFocusedMinutes = () => {
-    if (!startedAtRef.current) return 0;
-    const pauseMs = isPaused && pauseStartRef.current
-      ? pauseOffsetRef.current + (Date.now() - pauseStartRef.current)
-      : pauseOffsetRef.current;
-    return Math.round((Date.now() - startedAtRef.current.getTime() - pauseMs) / 60000);
-  };
-
   const energyEmojis = ['😴', '😐', '🙂', '😊', '⚡'];
 
   if (loading) return <div className="p-6"><div className="h-8 bg-muted rounded w-48 animate-pulse" /></div>;
