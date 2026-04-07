@@ -62,6 +62,7 @@ export default function Study() {
   const [liveFocusedMin, setLiveFocusedMin] = useState(0);
 
   // Refs hold "true" values even inside stale closures
+<<<<<<< HEAD
   const startedAtRef       = useRef<Date | null>(null);
   const pauseOffsetRef     = useRef<number>(0);
   const pauseStartRef      = useRef<number | null>(null);
@@ -70,6 +71,14 @@ export default function Study() {
   const activeSessionIdRef = useRef<string | null>(null);
   // Ref to prevent the timer-done path from running more than once
   const timerDoneRef       = useRef<boolean>(false);
+=======
+  const startedAtRef     = useRef<Date | null>(null);
+  const pauseOffsetRef   = useRef<number>(0);        // total ms spent paused
+  const pauseStartRef    = useRef<number | null>(null); // when current pause began
+  const intervalRef      = useRef<number | null>(null);
+  const finalDurationRef = useRef<number>(0);        // actual focused minutes
+  const activeSessionIdRef = useRef<string | null>(null); // DB row id for live session
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
 
   // ── Post-session fields ───────────────────────────────────────────────────
   const [reflection, setReflection]   = useState('');
@@ -104,7 +113,10 @@ export default function Study() {
             startedAtRef.current       = new Date(data.startedAt);
             pauseOffsetRef.current     = data.pauseOffset || 0;
             activeSessionIdRef.current = data.sessionId || null;
+<<<<<<< HEAD
             timerDoneRef.current       = false;
+=======
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
             setTimeLeft(remaining);
             setPhase('active');
             setSelectedModuleId(data.moduleId || '');
@@ -130,6 +142,7 @@ export default function Study() {
     intervalRef.current = window.setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
+<<<<<<< HEAD
           // Stop the interval immediately
           if (intervalRef.current) {
             clearInterval(intervalRef.current);
@@ -140,12 +153,21 @@ export default function Study() {
             timerDoneRef.current = true;
             handleTimerComplete();
           }
+=======
+          clearInterval(intervalRef.current!);
+          playDone();
+          setTimeout(() => commitDurationAndGoToPost(), 0);
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
           return 0;
         }
         return prev - 1;
       });
+<<<<<<< HEAD
 
       // Update live focused minutes
+=======
+      // Update live focused minutes reactively
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
       if (startedAtRef.current) {
         const pauseMs = pauseOffsetRef.current;
         const focused = Math.round((Date.now() - startedAtRef.current.getTime() - pauseMs) / 60000);
@@ -274,6 +296,30 @@ export default function Study() {
     activeSessionIdRef.current = data.id;
     setSessions(prev => [data as StudySession, ...prev]);
 
+    // Create DB record immediately so it appears in history
+    const { data, error } = await supabase
+      .from('study_sessions')
+      .insert({
+        user_id:            user.id,
+        module_id:          selectedModuleId,
+        started_at:         now.toISOString(),
+        duration_minutes:   0,
+        topic,
+        energy_level:       energyLevel,
+        distractions_count: 0,
+        session_type:       sessionType === 'custom' ? `custom_${minutes}min` : sessionType,
+      } as any)
+      .select()
+      .single();
+
+    if (error) {
+      toast.error('Failed to start session: ' + error.message);
+      return;
+    }
+
+    activeSessionIdRef.current = data.id;
+    setSessions(prev => [data as StudySession, ...prev]);
+
     setTimeLeft(minutes * 60);
     setLiveFocusedMin(0);
     setDistractions(0);
@@ -296,10 +342,14 @@ export default function Study() {
   };
 
   const endEarly = () => {
+<<<<<<< HEAD
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+=======
+    if (intervalRef.current) clearInterval(intervalRef.current);
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
     if (isPaused && pauseStartRef.current !== null) {
       pauseOffsetRef.current += Date.now() - pauseStartRef.current;
       pauseStartRef.current = null;
@@ -314,6 +364,7 @@ export default function Study() {
     localStorage.removeItem('studyos_timer');
   };
 
+<<<<<<< HEAD
   // Called from the post phase — saves reflection & energy, then resets
   const saveReflection = async () => {
     if (!user || !activeSessionIdRef.current) {
@@ -328,6 +379,34 @@ export default function Study() {
         energy_level_after: energyAfter,
         reflection,
       } as any)
+=======
+  const saveSession = async () => {
+    if (!user || !activeSessionIdRef.current) {
+      toast.error('No active session to save');
+      return;
+    }
+
+    const duration = finalDurationRef.current > 0 ? finalDurationRef.current : displayDuration;
+    if (duration < 1) {
+      toast.error('Session too short to save');
+      return;
+    }
+
+    const startedAt = startedAtRef.current ?? new Date(Date.now() - duration * 60000);
+    const endedAt   = new Date();
+
+    const updatePayload: Record<string, unknown> = {
+      ended_at:           endedAt.toISOString(),
+      duration_minutes:   duration,
+      energy_level_after: energyAfter,
+      reflection,
+      distractions_count: distractions,
+    };
+
+    const { data, error } = await supabase
+      .from('study_sessions')
+      .update(updatePayload as any)
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
       .eq('id', activeSessionIdRef.current)
       .select()
       .single();
@@ -337,6 +416,7 @@ export default function Study() {
       return;
     }
 
+<<<<<<< HEAD
     setSessions(prev =>
       prev.map(s => s.id === activeSessionIdRef.current ? (data as StudySession) : s)
     );
@@ -350,6 +430,15 @@ export default function Study() {
   };
 
   function resetToSetup() {
+=======
+    // Update the session in local state
+    setSessions(prev =>
+      prev.map(s => s.id === activeSessionIdRef.current ? (data as StudySession) : s)
+    );
+    toast.success(`Saved: ${duration} minutes of focused study`);
+
+    // Reset all state
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
     setPhase('setup');
     setTopic('');
     setReflection('');
@@ -363,8 +452,12 @@ export default function Study() {
     pauseStartRef.current      = null;
     finalDurationRef.current   = 0;
     activeSessionIdRef.current = null;
+<<<<<<< HEAD
     timerDoneRef.current       = false;
   }
+=======
+  };
+>>>>>>> 4661b45d75e7ef7c9ce0c6786d7baaa5f3b4b3f1
 
   // ── Display helpers ───────────────────────────────────────────────────────
   const formatTime = (secs: number) => {
