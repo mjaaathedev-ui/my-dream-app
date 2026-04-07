@@ -36,6 +36,7 @@ export default function Study() {
   const [timeLeft, setTimeLeft]   = useState(0);
   const [isPaused, setIsPaused]   = useState(false);
   const [distractions, setDistractions] = useState(0);
+  const [liveFocusedMin, setLiveFocusedMin] = useState(0);
 
   // Refs hold "true" values even inside stale closures
   const startedAtRef     = useRef<Date | null>(null);
@@ -43,6 +44,7 @@ export default function Study() {
   const pauseStartRef    = useRef<number | null>(null); // when current pause began
   const intervalRef      = useRef<number | null>(null);
   const finalDurationRef = useRef<number>(0);        // actual focused minutes
+  const activeSessionIdRef = useRef<string | null>(null); // DB row id for live session
 
   // ── Post-session fields ───────────────────────────────────────────────────
   const [reflection, setReflection]   = useState('');
