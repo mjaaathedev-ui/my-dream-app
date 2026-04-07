@@ -448,7 +448,7 @@ export default function Study() {
                 {formatTime(timeLeft)}
               </p>
               <p className="text-sm opacity-40 mb-8">
-                {getLiveFocusedMinutes()}m focused{isPaused ? ' · paused' : ''}
+                {liveFocusedMin}m focused{isPaused ? ' · paused' : ''}
               </p>
 
               <div className="flex gap-3 mb-8">
