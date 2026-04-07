@@ -170,7 +170,12 @@ export default function Study() {
   }
 
   // ── Session controls ──────────────────────────────────────────────────────
-  const startSession = () => {
+  const startSession = async () => {
+    if (!user || !selectedModuleId) {
+      toast.error('Please select a module');
+      return;
+    }
+
     let minutes: number;
     if (sessionType === 'custom') {
       minutes = Math.max(1, parseInt(customMinutes, 10) || 60);
@@ -179,12 +184,38 @@ export default function Study() {
       minutes = type?.work ?? 50;
     }
 
-    startedAtRef.current     = new Date();
+    const now = new Date();
+    startedAtRef.current     = now;
     pauseOffsetRef.current   = 0;
     pauseStartRef.current    = null;
     finalDurationRef.current = 0;
 
+    // Create DB record immediately so it appears in history
+    const { data, error } = await supabase
+      .from('study_sessions')
+      .insert({
+        user_id:            user.id,
+        module_id:          selectedModuleId,
+        started_at:         now.toISOString(),
+        duration_minutes:   0,
+        topic,
+        energy_level:       energyLevel,
+        distractions_count: 0,
+        session_type:       sessionType === 'custom' ? `custom_${minutes}min` : sessionType,
+      } as any)
+      .select()
+      .single();
+
+    if (error) {
+      toast.error('Failed to start session: ' + error.message);
+      return;
+    }
+
+    activeSessionIdRef.current = data.id;
+    setSessions(prev => [data as StudySession, ...prev]);
+
     setTimeLeft(minutes * 60);
+    setLiveFocusedMin(0);
     setDistractions(0);
     setDisplayDuration(0);
     setIsPaused(false);
@@ -193,14 +224,12 @@ export default function Study() {
 
   const togglePause = () => {
     if (isPaused) {
-      // Resuming — accumulate paused time
       if (pauseStartRef.current !== null) {
         pauseOffsetRef.current += Date.now() - pauseStartRef.current;
         pauseStartRef.current = null;
       }
       setIsPaused(false);
     } else {
-      // Pausing
       pauseStartRef.current = Date.now();
       setIsPaused(true);
     }
@@ -208,7 +237,6 @@ export default function Study() {
 
   const endEarly = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
-    // Finalise any in-progress pause
     if (isPaused && pauseStartRef.current !== null) {
       pauseOffsetRef.current += Date.now() - pauseStartRef.current;
       pauseStartRef.current = null;
@@ -218,8 +246,8 @@ export default function Study() {
   };
 
   const saveSession = async () => {
-    if (!user || !selectedModuleId) {
-      toast.error('Please select a module');
+    if (!user || !activeSessionIdRef.current) {
+      toast.error('No active session to save');
       return;
     }
 
@@ -230,52 +258,33 @@ export default function Study() {
     }
 
     const startedAt = startedAtRef.current ?? new Date(Date.now() - duration * 60000);
-    const endedAt   = new Date(startedAt.getTime() + (duration * 60000) + pauseOffsetRef.current);
+    const endedAt   = new Date();
 
-    const insertPayload: Record<string, unknown> = {
-      user_id:            user.id,
-      module_id:          selectedModuleId,
-      started_at:         startedAt.toISOString(),
+    const updatePayload: Record<string, unknown> = {
       ended_at:           endedAt.toISOString(),
       duration_minutes:   duration,
-      topic,
-      energy_level:       energyLevel,
       energy_level_after: energyAfter,
       reflection,
       distractions_count: distractions,
-      session_type:       sessionType === 'custom' ? `custom_${duration}min` : sessionType,
     };
-
-    if (selectedGoalId && selectedGoalId !== 'none') {
-      insertPayload.goal_id = selectedGoalId;
-    }
 
     const { data, error } = await supabase
       .from('study_sessions')
-      .insert(insertPayload as any)
+      .update(updatePayload as any)
+      .eq('id', activeSessionIdRef.current)
       .select()
       .single();
 
     if (error) {
-      // Graceful fallback if goal_id migration hasn't been run yet
-      if (error.message?.includes('goal_id')) {
-        delete insertPayload.goal_id;
-        const { data: d2, error: e2 } = await supabase
-          .from('study_sessions')
-          .insert(insertPayload as any)
-          .select()
-          .single();
-        if (e2) { toast.error(e2.message); return; }
-        setSessions(prev => [d2 as StudySession, ...prev]);
-        toast.success(`Session saved: ${duration}min — run the migration to enable goal linking`);
-      } else {
-        toast.error(error.message);
-        return;
-      }
-    } else {
-      setSessions(prev => [data as StudySession, ...prev]);
-      toast.success(`Saved: ${duration} minutes of focused study`);
+      toast.error(error.message);
+      return;
     }
+
+    // Update the session in local state
+    setSessions(prev =>
+      prev.map(s => s.id === activeSessionIdRef.current ? (data as StudySession) : s)
+    );
+    toast.success(`Saved: ${duration} minutes of focused study`);
 
     // Reset all state
     setPhase('setup');
@@ -283,12 +292,14 @@ export default function Study() {
     setReflection('');
     setDistractions(0);
     setDisplayDuration(0);
+    setLiveFocusedMin(0);
     setSelectedGoalId('none');
     setIsPaused(false);
-    startedAtRef.current     = null;
-    pauseOffsetRef.current   = 0;
-    pauseStartRef.current    = null;
-    finalDurationRef.current = 0;
+    startedAtRef.current       = null;
+    pauseOffsetRef.current     = 0;
+    pauseStartRef.current      = null;
+    finalDurationRef.current   = 0;
+    activeSessionIdRef.current = null;
   };
 
   // ── Display helpers ───────────────────────────────────────────────────────
