@@ -135,6 +135,7 @@ export default function Study() {
       sessionType,
       startedAt: startedAtRef.current?.toISOString(),
       pauseOffset: pauseOffsetRef.current,
+      sessionId: activeSessionIdRef.current,
     }));
   }, [phase, timeLeft, selectedModuleId, selectedGoalId, topic, distractions, sessionType]);
 
