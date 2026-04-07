@@ -1,20 +1,26 @@
-import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { toast } from 'sonner';
-import { BookOpen } from 'lucide-react';
+import { useState } from "react";
+import { Navigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { toast } from "sonner";
+import { BookOpen } from "lucide-react";
 
 export default function Auth() {
   const { user, loading, signIn, signUp } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -34,13 +40,13 @@ export default function Auth() {
     try {
       if (isLogin) {
         await signIn(email, password);
-        toast.success('Welcome back!');
+        toast.success("Welcome back!");
       } else {
         await signUp(email, password, fullName);
-        toast.success('Account created! Check your email to verify.');
+        toast.success("Account created! Check your email to verify.");
       }
     } catch (err: any) {
-      toast.error(err.message || 'Authentication failed');
+      toast.error(err.message || "Authentication failed");
     } finally {
       setSubmitting(false);
     }
@@ -48,19 +54,20 @@ export default function Auth() {
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/dashboard`,
-        },
-      });
-      if (error) toast.error(error.message || 'Google sign-in failed');
-    } catch (err: any) {
-      toast.error(err.message || 'Google sign-in failed');
-    } finally {
-      setGoogleLoading(false);
-    }
+    Navigate("./GoogleAuthError");
+    // try {
+    //   const { error } = await supabase.auth.signInWithOAuth({
+    //     provider: 'google',
+    //     options: {
+    //       redirectTo: `${window.location.origin}/dashboard`,
+    //     },
+    //   });
+    //   if (error) toast.error(error.message || 'Google sign-in failed');
+    // } catch (err: any) {
+    //   toast.error(err.message || 'Google sign-in failed');
+    // } finally {
+    //   setGoogleLoading(false);
+    // }
   };
 
   return (
@@ -72,7 +79,9 @@ export default function Auth() {
           </div>
           <CardTitle className="text-2xl">StudyOS</CardTitle>
           <CardDescription>
-            {isLogin ? 'Sign in to your account' : 'Create your StudyOS account'}
+            {isLogin
+              ? "Sign in to your account"
+              : "Create your StudyOS account"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -81,6 +90,7 @@ export default function Auth() {
             variant="outline"
             className="w-full gap-2 mb-4"
             onClick={handleGoogleSignIn}
+            Link
             disabled={googleLoading}
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24">
@@ -101,7 +111,7 @@ export default function Auth() {
                 fill="#EA4335"
               />
             </svg>
-            {googleLoading ? 'Connecting...' : 'Continue with Google'}
+            {googleLoading ? "Connecting..." : "Continue with Google"}
           </Button>
 
           <div className="relative mb-4">
@@ -120,7 +130,7 @@ export default function Auth() {
                 <Input
                   id="name"
                   value={fullName}
-                  onChange={e => setFullName(e.target.value)}
+                  onChange={(e) => setFullName(e.target.value)}
                   placeholder="Your full name"
                   required
                 />
@@ -132,7 +142,7 @@ export default function Auth() {
                 id="email"
                 type="email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@university.edu"
                 required
               />
@@ -143,14 +153,18 @@ export default function Auth() {
                 id="password"
                 type="password"
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
                 minLength={6}
               />
             </div>
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? 'Loading...' : isLogin ? 'Sign in' : 'Create account'}
+              {submitting
+                ? "Loading..."
+                : isLogin
+                  ? "Sign in"
+                  : "Create account"}
             </Button>
           </form>
 
@@ -162,7 +176,7 @@ export default function Auth() {
             >
               {isLogin
                 ? "Don't have an account? Sign up"
-                : 'Already have an account? Sign in'}
+                : "Already have an account? Sign in"}
             </button>
           </div>
         </CardContent>

@@ -13,7 +13,61 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { Save, MessageSquare, Bell, Shield, Calendar, Mail, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
 import { CAREER_FIELDS, YEAR_OPTIONS, SESSION_TYPES } from '@/types/database';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+
+// ── Map any Google / Supabase error shape to a reason slug ───────────────────
+function resolveGoogleErrorReason(err: any): string {
+  const msg: string = (err?.message || err?.msg || '').toLowerCase();
+  const errorCode: string = (err?.error_code || '').toLowerCase();
+  const statusCode: number = err?.code || err?.status || 0;
+
+  // Provider not configured in Supabase dashboard
+  // e.g. {"code":400,"error_code":"validation_failed","msg":"Unsupported provider: missing OAuth secret"}
+  if (
+    errorCode === 'validation_failed' ||
+    msg.includes('missing oauth secret') ||
+    msg.includes('unsupported provider') ||
+    msg.includes('provider is not supported') ||
+    msg.includes('oauth secret')
+  ) {
+    return 'provider_not_configured';
+  }
+
+  // User cancelled the Google consent screen
+  if (msg.includes('access_denied') || errorCode === 'access_denied') {
+    return 'access_denied';
+  }
+
+  // Token / code exchange failed
+  if (
+    errorCode === 'token_exchange_failed' ||
+    msg.includes('token') ||
+    msg.includes('exchange')
+  ) {
+    return 'token_exchange_failed';
+  }
+
+  // CSRF / state mismatch
+  if (
+    errorCode === 'state_mismatch' ||
+    msg.includes('state') ||
+    msg.includes('pkce')
+  ) {
+    return 'state_mismatch';
+  }
+
+  // Network error
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch')) {
+    return 'network_error';
+  }
+
+  // Rate limiting
+  if (statusCode === 429 || msg.includes('rate limit') || msg.includes('too many')) {
+    return 'rate_limited';
+  }
+
+  return 'unknown';
+}
 
 export default function Settings() {
   const { profile, user, refreshProfile, signOut } = useAuth();
@@ -41,6 +95,7 @@ export default function Settings() {
 
   const [saving, setSaving] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   // Google integration state
   const [googleConnected, setGoogleConnected] = useState(false);
@@ -55,13 +110,14 @@ export default function Settings() {
       if (data) {
         setGoogleConnected(true);
         setGoogleTokenCreatedAt(data.created_at);
-        // Fetch calendar list
         fetchCalendars();
       }
     };
     checkGoogle();
 
     const googleParam = searchParams.get('google');
+    const reason = searchParams.get('reason');
+
     if (googleParam === 'connected') {
       toast.success('Google account connected!');
       setGoogleConnected(true);
@@ -69,10 +125,14 @@ export default function Settings() {
       searchParams.delete('google');
       setSearchParams(searchParams, { replace: true });
     } else if (googleParam === 'error') {
-      toast.error('Failed to connect Google account');
-      searchParams.delete('google');
-      searchParams.delete('reason');
-      setSearchParams(searchParams, { replace: true });
+      if (reason) {
+        navigate(`/auth/google/error?reason=${encodeURIComponent(reason)}`, { replace: true });
+      } else {
+        toast.error('Failed to connect Google account. Please try again.');
+        searchParams.delete('google');
+        searchParams.delete('reason');
+        setSearchParams(searchParams, { replace: true });
+      }
     }
   }, []);
 
@@ -87,7 +147,6 @@ export default function Settings() {
       if (res.ok) {
         const data = await res.json();
         setCalendars(data.calendars || []);
-        // Auto-select primary if none selected
         if (!selectedCalendarId && data.calendars?.length > 0) {
           const primary = data.calendars.find((c: any) => c.primary);
           if (primary) setSelectedCalendarId(primary.id);
@@ -108,14 +167,34 @@ export default function Settings() {
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth?action=auth`,
         { headers: { Authorization: `Bearer ${session.access_token}` } }
       );
+
+      // Non-2xx response — parse the error body and redirect
+      if (!res.ok) {
+        let errBody: any = {};
+        try { errBody = await res.json(); } catch {}
+        const reason = resolveGoogleErrorReason({ ...errBody, status: res.status });
+        navigate(`/auth/google/error?reason=${encodeURIComponent(reason)}`);
+        return;
+      }
+
       const data = await res.json();
+
+      // Edge function returned a 200 but with an error payload
+      if (data.error || data.error_code) {
+        const reason = resolveGoogleErrorReason(data);
+        navigate(`/auth/google/error?reason=${encodeURIComponent(reason)}`);
+        return;
+      }
+
       if (data.url) {
         window.location.href = data.url;
       } else {
-        toast.error(data.error || 'Failed to start Google auth');
+        navigate('/auth/google/error?reason=unknown');
       }
     } catch (err: any) {
-      toast.error(err.message || 'Failed to connect');
+      // Network-level failure
+      const reason = resolveGoogleErrorReason(err);
+      navigate(`/auth/google/error?reason=${encodeURIComponent(reason)}`);
     } finally {
       setGoogleLoading(false);
     }
@@ -352,6 +431,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
+      {/* WhatsApp */}
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">

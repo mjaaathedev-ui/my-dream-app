@@ -16,6 +16,29 @@ import { SESSION_TYPES } from '@/types/database';
 
 type Phase = 'setup' | 'active' | 'post';
 
+// ── Sound helper (outside component, no stale closure risk) ──────────────────
+function playCompletionSound() {
+  try {
+    const ctx = new AudioContext();
+    // Three-note ascending chime
+    const notes = [523, 659, 784]; // C5, E5, G5
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.5);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.18);
+      osc.stop(ctx.currentTime + i * 0.18 + 0.5);
+    });
+  } catch {
+    // AudioContext not available — silently ignore
+  }
+}
+
 export default function Study() {
   const { user } = useAuth();
   const [modules, setModules]   = useState<Module[]>([]);
@@ -36,18 +59,22 @@ export default function Study() {
   const [timeLeft, setTimeLeft]   = useState(0);
   const [isPaused, setIsPaused]   = useState(false);
   const [distractions, setDistractions] = useState(0);
+  const [liveFocusedMin, setLiveFocusedMin] = useState(0);
 
   // Refs hold "true" values even inside stale closures
-  const startedAtRef     = useRef<Date | null>(null);
-  const pauseOffsetRef   = useRef<number>(0);        // total ms spent paused
-  const pauseStartRef    = useRef<number | null>(null); // when current pause began
-  const intervalRef      = useRef<number | null>(null);
-  const finalDurationRef = useRef<number>(0);        // actual focused minutes
+  const startedAtRef       = useRef<Date | null>(null);
+  const pauseOffsetRef     = useRef<number>(0);
+  const pauseStartRef      = useRef<number | null>(null);
+  const intervalRef        = useRef<number | null>(null);
+  const finalDurationRef   = useRef<number>(0);
+  const activeSessionIdRef = useRef<string | null>(null);
+  // Ref to prevent the timer-done path from running more than once
+  const timerDoneRef       = useRef<boolean>(false);
 
   // ── Post-session fields ───────────────────────────────────────────────────
   const [reflection, setReflection]   = useState('');
   const [energyAfter, setEnergyAfter] = useState(3);
-  const [displayDuration, setDisplayDuration] = useState(0); // for UI only
+  const [displayDuration, setDisplayDuration] = useState(0);
 
   // ── Load data ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -74,8 +101,10 @@ export default function Study() {
           const elapsedSinceSnapshot = Math.floor((Date.now() - data.savedAt) / 1000);
           const remaining = data.timeLeft - elapsedSinceSnapshot;
           if (remaining > 0) {
-            startedAtRef.current   = new Date(data.startedAt);
-            pauseOffsetRef.current = data.pauseOffset || 0;
+            startedAtRef.current       = new Date(data.startedAt);
+            pauseOffsetRef.current     = data.pauseOffset || 0;
+            activeSessionIdRef.current = data.sessionId || null;
+            timerDoneRef.current       = false;
             setTimeLeft(remaining);
             setPhase('active');
             setSelectedModuleId(data.moduleId || '');
@@ -84,6 +113,7 @@ export default function Study() {
             setDistractions(data.distractions || 0);
             setSessionType(data.sessionType || 'pomodoro');
           } else {
+            // Timer would have expired while the tab was closed — just clean up
             localStorage.removeItem('studyos_timer');
           }
         }
@@ -94,26 +124,41 @@ export default function Study() {
   }, [user]);
 
   // ── Countdown ticker ──────────────────────────────────────────────────────
-  // NOTE: deps intentionally only [phase, isPaused] — we do NOT include timeLeft
-  // so the interval is created once per phase/pause change, not every second.
   useEffect(() => {
     if (phase !== 'active' || isPaused) return;
 
     intervalRef.current = window.setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
-          clearInterval(intervalRef.current!);
-          playDone();
-          // Use a tiny timeout so the state flush from setTimeLeft(0) finishes
-          // before we read refs and transition phase.
-          setTimeout(() => commitDurationAndGoToPost(), 0);
+          // Stop the interval immediately
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          // Guard against double-fire
+          if (!timerDoneRef.current) {
+            timerDoneRef.current = true;
+            handleTimerComplete();
+          }
           return 0;
         }
         return prev - 1;
       });
+
+      // Update live focused minutes
+      if (startedAtRef.current) {
+        const pauseMs = pauseOffsetRef.current;
+        const focused = Math.round((Date.now() - startedAtRef.current.getTime() - pauseMs) / 60000);
+        setLiveFocusedMin(Math.max(0, focused));
+      }
     }, 1000);
 
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, isPaused]);
 
@@ -131,21 +176,11 @@ export default function Study() {
       sessionType,
       startedAt: startedAtRef.current?.toISOString(),
       pauseOffset: pauseOffsetRef.current,
+      sessionId: activeSessionIdRef.current,
     }));
   }, [phase, timeLeft, selectedModuleId, selectedGoalId, topic, distractions, sessionType]);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  function playDone() {
-    try {
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      osc.frequency.value = 800;
-      osc.connect(ctx.destination);
-      osc.start();
-      setTimeout(() => osc.stop(), 300);
-    } catch {}
-  }
-
+  // ── Compute focused minutes ───────────────────────────────────────────────
   function computeFocusedMinutes(): number {
     if (!startedAtRef.current) return 1;
     let pauseMs = pauseOffsetRef.current;
@@ -157,16 +192,49 @@ export default function Study() {
     ));
   }
 
-  function commitDurationAndGoToPost() {
+  // ── Called when the countdown reaches zero (natural completion) ───────────
+  // This auto-saves the session and goes to post phase for reflection only
+  async function handleTimerComplete() {
+    playCompletionSound();
+    localStorage.removeItem('studyos_timer');
+
     const duration = computeFocusedMinutes();
     finalDurationRef.current = duration;
     setDisplayDuration(duration);
+
+    // Auto-save the core session data immediately
+    if (user && activeSessionIdRef.current) {
+      const endedAt = new Date();
+      const { data, error } = await supabase
+        .from('study_sessions')
+        .update({
+          ended_at:           endedAt.toISOString(),
+          duration_minutes:   duration,
+          distractions_count: distractions,
+        } as any)
+        .eq('id', activeSessionIdRef.current)
+        .select()
+        .single();
+
+      if (!error && data) {
+        setSessions(prev =>
+          prev.map(s => s.id === activeSessionIdRef.current ? (data as StudySession) : s)
+        );
+      }
+    }
+
+    // Move to post phase so user can add reflection & energy rating
     setPhase('post');
-    localStorage.removeItem('studyos_timer');
+    toast.success(`Session complete! ${duration} minutes logged. Add your reflection below.`);
   }
 
   // ── Session controls ──────────────────────────────────────────────────────
-  const startSession = () => {
+  const startSession = async () => {
+    if (!user || !selectedModuleId) {
+      toast.error('Please select a module');
+      return;
+    }
+
     let minutes: number;
     if (sessionType === 'custom') {
       minutes = Math.max(1, parseInt(customMinutes, 10) || 60);
@@ -175,12 +243,39 @@ export default function Study() {
       minutes = type?.work ?? 50;
     }
 
-    startedAtRef.current     = new Date();
+    const now = new Date();
+    startedAtRef.current     = now;
     pauseOffsetRef.current   = 0;
     pauseStartRef.current    = null;
     finalDurationRef.current = 0;
+    timerDoneRef.current     = false;
+
+    // Create DB record immediately
+    const { data, error } = await supabase
+      .from('study_sessions')
+      .insert({
+        user_id:            user.id,
+        module_id:          selectedModuleId,
+        started_at:         now.toISOString(),
+        duration_minutes:   0,
+        topic,
+        energy_level:       energyLevel,
+        distractions_count: 0,
+        session_type:       sessionType === 'custom' ? `custom_${minutes}min` : sessionType,
+      } as any)
+      .select()
+      .single();
+
+    if (error) {
+      toast.error('Failed to start session: ' + error.message);
+      return;
+    }
+
+    activeSessionIdRef.current = data.id;
+    setSessions(prev => [data as StudySession, ...prev]);
 
     setTimeLeft(minutes * 60);
+    setLiveFocusedMin(0);
     setDistractions(0);
     setDisplayDuration(0);
     setIsPaused(false);
@@ -189,117 +284,93 @@ export default function Study() {
 
   const togglePause = () => {
     if (isPaused) {
-      // Resuming — accumulate paused time
       if (pauseStartRef.current !== null) {
         pauseOffsetRef.current += Date.now() - pauseStartRef.current;
         pauseStartRef.current = null;
       }
       setIsPaused(false);
     } else {
-      // Pausing
       pauseStartRef.current = Date.now();
       setIsPaused(true);
     }
   };
 
   const endEarly = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    // Finalise any in-progress pause
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     if (isPaused && pauseStartRef.current !== null) {
       pauseOffsetRef.current += Date.now() - pauseStartRef.current;
       pauseStartRef.current = null;
     }
     setIsPaused(false);
-    commitDurationAndGoToPost();
+    timerDoneRef.current = true;
+
+    const duration = computeFocusedMinutes();
+    finalDurationRef.current = duration;
+    setDisplayDuration(duration);
+    setPhase('post');
+    localStorage.removeItem('studyos_timer');
   };
 
-  const saveSession = async () => {
-    if (!user || !selectedModuleId) {
-      toast.error('Please select a module');
+  // Called from the post phase — saves reflection & energy, then resets
+  const saveReflection = async () => {
+    if (!user || !activeSessionIdRef.current) {
+      // If somehow there's no active session (e.g. edge case), just reset
+      resetToSetup();
       return;
-    }
-
-    const duration = finalDurationRef.current > 0 ? finalDurationRef.current : displayDuration;
-    if (duration < 1) {
-      toast.error('Session too short to save');
-      return;
-    }
-
-    const startedAt = startedAtRef.current ?? new Date(Date.now() - duration * 60000);
-    const endedAt   = new Date(startedAt.getTime() + (duration * 60000) + pauseOffsetRef.current);
-
-    const insertPayload: Record<string, unknown> = {
-      user_id:            user.id,
-      module_id:          selectedModuleId,
-      started_at:         startedAt.toISOString(),
-      ended_at:           endedAt.toISOString(),
-      duration_minutes:   duration,
-      topic,
-      energy_level:       energyLevel,
-      energy_level_after: energyAfter,
-      reflection,
-      distractions_count: distractions,
-      session_type:       sessionType === 'custom' ? `custom_${duration}min` : sessionType,
-    };
-
-    if (selectedGoalId && selectedGoalId !== 'none') {
-      insertPayload.goal_id = selectedGoalId;
     }
 
     const { data, error } = await supabase
       .from('study_sessions')
-      .insert(insertPayload as any)
+      .update({
+        energy_level_after: energyAfter,
+        reflection,
+      } as any)
+      .eq('id', activeSessionIdRef.current)
       .select()
       .single();
 
     if (error) {
-      // Graceful fallback if goal_id migration hasn't been run yet
-      if (error.message?.includes('goal_id')) {
-        delete insertPayload.goal_id;
-        const { data: d2, error: e2 } = await supabase
-          .from('study_sessions')
-          .insert(insertPayload as any)
-          .select()
-          .single();
-        if (e2) { toast.error(e2.message); return; }
-        setSessions(prev => [d2 as StudySession, ...prev]);
-        toast.success(`Session saved: ${duration}min — run the migration to enable goal linking`);
-      } else {
-        toast.error(error.message);
-        return;
-      }
-    } else {
-      setSessions(prev => [data as StudySession, ...prev]);
-      toast.success(`Saved: ${duration} minutes of focused study`);
+      toast.error(error.message);
+      return;
     }
 
-    // Reset all state
+    setSessions(prev =>
+      prev.map(s => s.id === activeSessionIdRef.current ? (data as StudySession) : s)
+    );
+    toast.success('Reflection saved!');
+    resetToSetup();
+  };
+
+  // Called if user wants to skip reflection
+  const skipReflection = () => {
+    resetToSetup();
+  };
+
+  function resetToSetup() {
     setPhase('setup');
     setTopic('');
     setReflection('');
     setDistractions(0);
     setDisplayDuration(0);
+    setLiveFocusedMin(0);
     setSelectedGoalId('none');
     setIsPaused(false);
-    startedAtRef.current     = null;
-    pauseOffsetRef.current   = 0;
-    pauseStartRef.current    = null;
-    finalDurationRef.current = 0;
-  };
+    startedAtRef.current       = null;
+    pauseOffsetRef.current     = 0;
+    pauseStartRef.current      = null;
+    finalDurationRef.current   = 0;
+    activeSessionIdRef.current = null;
+    timerDoneRef.current       = false;
+  }
 
   // ── Display helpers ───────────────────────────────────────────────────────
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const getLiveFocusedMinutes = () => {
-    if (!startedAtRef.current) return 0;
-    const pauseMs = isPaused && pauseStartRef.current
-      ? pauseOffsetRef.current + (Date.now() - pauseStartRef.current)
-      : pauseOffsetRef.current;
-    return Math.round((Date.now() - startedAtRef.current.getTime() - pauseMs) / 60000);
   };
 
   const energyEmojis = ['😴', '😐', '🙂', '😊', '⚡'];
@@ -441,7 +512,7 @@ export default function Study() {
                 {formatTime(timeLeft)}
               </p>
               <p className="text-sm opacity-40 mb-8">
-                {getLiveFocusedMinutes()}m focused{isPaused ? ' · paused' : ''}
+                {liveFocusedMin}m focused{isPaused ? ' · paused' : ''}
               </p>
 
               <div className="flex gap-3 mb-8">
@@ -470,10 +541,11 @@ export default function Study() {
             <Card className="border-border shadow-sm">
               <CardContent className="p-6 space-y-5">
                 <div className="text-center mb-2">
-                  <h2 className="text-lg font-semibold">Session complete 🎉</h2>
+                  <div className="text-4xl mb-2">🎉</div>
+                  <h2 className="text-lg font-semibold">Session complete!</h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     <span className="font-mono font-semibold text-foreground">{displayDuration} min</span>
-                    {' '}of focused study
+                    {' '}of focused study logged
                     {distractions > 0 && ` · ${distractions} distraction${distractions !== 1 ? 's' : ''}`}
                   </p>
                   {selectedGoalId && selectedGoalId !== 'none' && (
@@ -481,10 +553,13 @@ export default function Study() {
                       🎯 {goals.find(g => g.id === selectedGoalId)?.title}
                     </p>
                   )}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Your time has been saved. Add a reflection to get the most out of this session.
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Reflection</Label>
+                  <Label>Reflection <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
                   <Textarea value={reflection} onChange={e => setReflection(e.target.value)}
                     placeholder="What did you cover? What's still unclear?" rows={3} />
                 </div>
@@ -504,9 +579,14 @@ export default function Study() {
                   </div>
                 </div>
 
-                <Button className="w-full" onClick={saveSession}>
-                  Save session
-                </Button>
+                <div className="flex gap-3">
+                  <Button className="flex-1" onClick={saveReflection}>
+                    Save reflection &amp; finish
+                  </Button>
+                  <Button variant="outline" onClick={skipReflection}>
+                    Skip
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

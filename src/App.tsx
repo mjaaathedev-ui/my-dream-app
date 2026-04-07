@@ -21,6 +21,7 @@ const Goals = lazy(() => import("./pages/Goals"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Settings = lazy(() => import("./pages/Settings"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const GoogleAuthError = lazy(() => import("./pages/GoogleAuthError"));
 
 const queryClient = new QueryClient();
 
@@ -88,6 +89,10 @@ const App = () => (
               <Route path="/" element={<RootRoute />} />
               <Route path="/auth" element={<AuthRoute />} />
               <Route path="/onboarding" element={<OnboardingRoute />} />
+
+              {/* Google OAuth error — outside ProtectedRoute so the redirect always lands */}
+              <Route path="/auth/google/error" element={<GoogleAuthError />} />
+
               <Route
                 element={
                   <ProtectedRoute>
