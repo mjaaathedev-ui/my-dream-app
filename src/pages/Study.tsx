@@ -96,8 +96,6 @@ export default function Study() {
   }, [user]);
 
   // ── Countdown ticker ──────────────────────────────────────────────────────
-  // NOTE: deps intentionally only [phase, isPaused] — we do NOT include timeLeft
-  // so the interval is created once per phase/pause change, not every second.
   useEffect(() => {
     if (phase !== 'active' || isPaused) return;
 
@@ -106,13 +104,17 @@ export default function Study() {
         if (prev <= 1) {
           clearInterval(intervalRef.current!);
           playDone();
-          // Use a tiny timeout so the state flush from setTimeLeft(0) finishes
-          // before we read refs and transition phase.
           setTimeout(() => commitDurationAndGoToPost(), 0);
           return 0;
         }
         return prev - 1;
       });
+      // Update live focused minutes reactively
+      if (startedAtRef.current) {
+        const pauseMs = pauseOffsetRef.current;
+        const focused = Math.round((Date.now() - startedAtRef.current.getTime() - pauseMs) / 60000);
+        setLiveFocusedMin(Math.max(0, focused));
+      }
     }, 1000);
 
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
