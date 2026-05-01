@@ -54,20 +54,19 @@ export default function Auth() {
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
-    Navigate("./GoogleAuthError");
-    // try {
-    //   const { error } = await supabase.auth.signInWithOAuth({
-    //     provider: 'google',
-    //     options: {
-    //       redirectTo: `${window.location.origin}/dashboard`,
-    //     },
-    //   });
-    //   if (error) toast.error(error.message || 'Google sign-in failed');
-    // } catch (err: any) {
-    //   toast.error(err.message || 'Google sign-in failed');
-    // } finally {
-    //   setGoogleLoading(false);
-    // }
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`,
+        },
+      });
+      if (error) toast.error(error.message || 'Google sign-in failed');
+    } catch (err: any) {
+      toast.error(err.message || 'Google sign-in failed');
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   return (
@@ -90,7 +89,6 @@ export default function Auth() {
             variant="outline"
             className="w-full gap-2 mb-4"
             onClick={handleGoogleSignIn}
-            Link
             disabled={googleLoading}
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24">
