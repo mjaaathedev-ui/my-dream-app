@@ -107,7 +107,7 @@ export default function Settings() {
 
   useEffect(() => {
     const checkGoogle = async () => {
-      const { data } = await supabase.from('google_tokens').select('id, created_at').single();
+      const { data } = await supabase.from('google_tokens').select('id, created_at').maybeSingle();
       if (data) {
         setGoogleConnected(true);
         setGoogleTokenCreatedAt(data.created_at);
