@@ -105,9 +105,35 @@ export default function Settings() {
   const [calendars, setCalendars] = useState<{ id: string; summary: string; primary: boolean; backgroundColor: string }[]>([]);
   const [selectedCalendarId, setSelectedCalendarId] = useState(profile?.google_calendar_id || '');
 
+  // Sync local form state when profile loads/changes
+  useEffect(() => {
+    if (!profile) return;
+    setFullName(profile.full_name || '');
+    setInstitution(profile.institution || '');
+    setDegree(profile.degree || '');
+    setYearOfStudy(profile.year_of_study || '');
+    setCareerGoal(profile.career_goal || '');
+    setCareerField(profile.career_field || '');
+    setWhyItMatters(profile.why_it_matters || '');
+    setTargetAverage([profile.target_average || 70]);
+    setHasFunding(profile.has_funding_condition || false);
+    setFundingCondition(profile.funding_condition || '');
+    setDailyTarget([profile.daily_study_target_hours || 4]);
+    setEmailReminders(profile.email_reminders_enabled ?? true);
+    setReminderDaysBefore([profile.reminder_days_before || 3]);
+    setDefaultSessionType(profile.default_session_type || 'pomodoro');
+    setDefaultPomodoro([profile.default_pomodoro_minutes || 50]);
+    setCheckinTime(profile.preferred_checkin_time || '07:00');
+    setTimezone(profile.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
+    setWhatsappNumber(profile.whatsapp_number || '');
+    setWhatsappEnabled(profile.whatsapp_enabled || false);
+    setCheckinInterval([profile.checkin_interval_hours || 6]);
+    setSelectedCalendarId(profile.google_calendar_id || '');
+  }, [profile]);
+
   useEffect(() => {
     const checkGoogle = async () => {
-      const { data } = await supabase.from('google_tokens').select('id, created_at').single();
+      const { data } = await supabase.from('google_tokens').select('id, created_at').maybeSingle();
       if (data) {
         setGoogleConnected(true);
         setGoogleTokenCreatedAt(data.created_at);
