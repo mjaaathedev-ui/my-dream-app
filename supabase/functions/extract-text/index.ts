@@ -39,12 +39,24 @@ serve(async (req) => {
 
     let extractedText = "";
     const isImage = file_type?.startsWith("image/");
-    
-    if (isImage) {
-      // Use AI vision to extract text from image
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(await fileData.arrayBuffer())));
-      const mimeType = file_type || "image/jpeg";
-      
+    const isPdf = file_type === "application/pdf" || file_name?.toLowerCase().endsWith(".pdf");
+    const isText = file_type?.startsWith("text/") || /\.(txt|md|csv)$/i.test(file_name || "");
+
+    if (isImage || isPdf) {
+      // Send image OR PDF to Gemini vision via the OpenAI-compatible gateway.
+      // Gemini natively accepts PDFs through inline_data, and the gateway
+      // forwards data: URLs with application/pdf as inline binary content.
+      const buffer = await fileData.arrayBuffer();
+      // Chunked base64 to avoid call-stack overflow on large files
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      const base64 = btoa(binary);
+      const mimeType = file_type || (isPdf ? "application/pdf" : "image/jpeg");
+
       const visionResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -57,7 +69,7 @@ serve(async (req) => {
             {
               role: "user",
               content: [
-                { type: "text", text: "Extract ALL text from this image. If it's a document, transcript, or study material, preserve the structure including dates, weights, percentages, and any tabular data. Return only the extracted text, no commentary." },
+                { type: "text", text: "Extract ALL text from this document. Preserve structure including headings, dates, weights, percentages, tables, and any tabular data. Return only the extracted text — no commentary, no markdown fences." },
                 { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
               ],
             },
@@ -68,9 +80,24 @@ serve(async (req) => {
       if (visionResponse.ok) {
         const visionData = await visionResponse.json();
         extractedText = visionData.choices?.[0]?.message?.content || "";
+      } else {
+        const errText = await visionResponse.text();
+        console.error("Vision extraction failed:", visionResponse.status, errText);
       }
-    } else {
+    } else if (isText) {
       extractedText = await fileData.text();
+    } else {
+      // Unknown binary (e.g. .docx) — try text first, fall back to vision
+      try {
+        extractedText = await fileData.text();
+        // Heuristic: if it looks like binary garbage, drop it
+        const printable = extractedText.replace(/[^\x20-\x7E\s]/g, "").length;
+        if (extractedText.length > 0 && printable / extractedText.length < 0.5) {
+          extractedText = "";
+        }
+      } catch {
+        extractedText = "";
+      }
     }
 
     // Detect document type and do smart analysis
