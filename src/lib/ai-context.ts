@@ -1,277 +1,321 @@
 import { supabase } from '@/integrations/supabase/client';
-import { format, subDays } from 'date-fns';
-import type { UserProfile, Module, Assessment, StudySession, UploadedFile } from '@/types/database';
+import { format, subDays, addDays, isWithinInterval, startOfDay } from 'date-fns';
+import type { UserProfile, Module, Assessment, StudySession } from '@/types/database';
 
 // ─── Full App Context (shared by ALL AI features) ────────────────────────────
+//
+// Performance: all DB queries run in parallel.
+// Quality: includes computed insights (per-module averages, projected finals,
+// needed marks to hit target, today's schedule, week-ahead snapshot).
+// Token budget: trims uploaded file text aggressively to keep context lean.
+
+const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function moduleStats(assessments: Assessment[], target: number) {
+  const submitted = assessments.filter(a => a.submitted && a.mark_achieved !== null);
+  const pending = assessments.filter(a => !a.submitted);
+  const submittedWeight = submitted.reduce((s, a) => s + a.weight_percent, 0);
+  const pendingWeight = pending.reduce((s, a) => s + a.weight_percent, 0);
+
+  let currentAvg: number | null = null;
+  let earnedPoints = 0;
+  if (submittedWeight > 0) {
+    earnedPoints = submitted.reduce(
+      (s, a) => s + ((a.mark_achieved! / (a.max_mark || 100)) * 100 * a.weight_percent), 0
+    );
+    currentAvg = earnedPoints / submittedWeight;
+  }
+
+  // Mark needed on remaining weighted work to hit target
+  let neededOnRemaining: number | null = null;
+  if (pendingWeight > 0 && currentAvg !== null) {
+    neededOnRemaining = (target * 100 - earnedPoints) / pendingWeight;
+  } else if (pendingWeight > 0) {
+    neededOnRemaining = target;
+  }
+
+  return { submitted, pending, submittedWeight, pendingWeight, currentAvg, neededOnRemaining };
+}
 
 export async function buildFullAppContext(userId: string, profile: UserProfile | null): Promise<string> {
+  const now = new Date();
+  const todayISO = format(now, 'yyyy-MM-dd');
+  const dayName = DAY_NAMES[(now.getDay() + 6) % 7]; // map JS Sun=0 to our Mon=0 system later
+  const todayDOW = (now.getDay() + 6) % 7; // 0=Mon..6=Sun
+  const monthAgo = subDays(now, 30);
+  const weekAhead = addDays(now, 7);
+  const target = profile?.target_average ?? 70;
+
+  // ── Parallel fetch of everything ─────────────────────────────────────────
+  const [
+    modulesRes, assessmentsRes, timetableRes,
+    sessionsRes, allDatesRes, goalsRes, tasksRes, filesRes,
+  ] = await Promise.all([
+    supabase.from('modules').select('*').eq('user_id', userId).eq('archived', false),
+    supabase.from('assessments').select('*').eq('user_id', userId),
+    supabase.from('timetable_entries').select('*').eq('user_id', userId).order('start_time'),
+    supabase.from('study_sessions').select('*').eq('user_id', userId)
+      .gte('started_at', monthAgo.toISOString()).order('started_at', { ascending: false }),
+    supabase.from('study_sessions').select('started_at').eq('user_id', userId),
+    supabase.from('goals').select('*').eq('user_id', userId),
+    supabase.from('tasks').select('*').eq('user_id', userId),
+    supabase.from('uploaded_files').select('id, file_name, module_id, extracted_text, upload_date')
+      .eq('user_id', userId).order('upload_date', { ascending: false }),
+  ]);
+
+  const mods = (modulesRes.data || []) as Module[];
+  const allAssessments = (assessmentsRes.data || []) as Assessment[];
+  const timetable = timetableRes.data || [];
+  const sessions = (sessionsRes.data || []) as StudySession[];
+  const allDates = allDatesRes.data || [];
+  const goals = (goalsRes.data as any[]) || [];
+  const tasks = (tasksRes.data as any[]) || [];
+  const files = (filesRes.data as any[]) || [];
+
   const parts: string[] = [];
+
+  // ── Today snapshot ───────────────────────────────────────────────────────
+  parts.push(`=== TODAY: ${dayName}, ${todayISO} ===`);
+
+  const todaysClasses = timetable.filter((e: any) => {
+    if (e.entry_type === 'once' && e.specific_date) return e.specific_date === todayISO;
+    return e.day_of_week === todayDOW;
+  });
+  if (todaysClasses.length) {
+    parts.push(`Today's schedule:`);
+    for (const e of todaysClasses) {
+      const m = mods.find(x => x.id === (e as any).module_id);
+      parts.push(`  • ${e.start_time}–${e.end_time} ${e.title}${e.location ? ` @ ${e.location}` : ''}${m ? ` [${m.name}]` : ''}`);
+    }
+  } else {
+    parts.push(`No scheduled classes today.`);
+  }
+
+  const dueThisWeek = allAssessments
+    .filter(a => a.due_date && !a.submitted)
+    .filter(a => isWithinInterval(new Date(a.due_date!), { start: startOfDay(now), end: weekAhead }))
+    .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime());
+  if (dueThisWeek.length) {
+    parts.push(`Due in next 7 days:`);
+    for (const a of dueThisWeek) {
+      const m = mods.find(x => x.id === a.module_id);
+      const days = Math.ceil((new Date(a.due_date!).getTime() - now.getTime()) / 86400000);
+      parts.push(`  • ${a.name} [${m?.name || '?'}] — ${a.weight_percent}%, ${days === 0 ? 'TODAY' : `in ${days}d`}`);
+    }
+  }
+
+  const tasksThisWeek = tasks
+    .filter(t => t.status !== 'done' && t.due_date)
+    .filter(t => isWithinInterval(new Date(t.due_date), { start: startOfDay(now), end: weekAhead }));
+  if (tasksThisWeek.length) {
+    parts.push(`Tasks due this week: ${tasksThisWeek.map(t => t.title).join('; ')}`);
+  }
 
   // ── Profile ──────────────────────────────────────────────────────────────
   if (profile) {
-    parts.push(`=== STUDENT PROFILE ===`);
-    parts.push(`Name: ${profile.full_name}`);
-    parts.push(`Institution: ${profile.institution}`);
-    parts.push(`Degree: ${profile.degree}, ${profile.year_of_study}`);
-    parts.push(`Career goal: ${profile.career_goal}`);
-    parts.push(`Career field: ${profile.career_field}`);
-    parts.push(`Why it matters: ${profile.why_it_matters}`);
-    parts.push(`Target average: ${profile.target_average}%`);
-    parts.push(`Daily study target: ${profile.daily_study_target_hours}h`);
+    parts.push(`\n=== STUDENT PROFILE ===`);
+    parts.push(`Name: ${profile.full_name || '(unset)'}`);
+    if (profile.institution) parts.push(`Institution: ${profile.institution}`);
+    if (profile.degree) parts.push(`Degree: ${profile.degree}${profile.year_of_study ? `, ${profile.year_of_study}` : ''}`);
+    if (profile.career_goal) parts.push(`Career goal: ${profile.career_goal}`);
+    if (profile.career_field) parts.push(`Field: ${profile.career_field}`);
+    if (profile.why_it_matters) parts.push(`Why it matters: ${profile.why_it_matters}`);
+    parts.push(`Target average: ${target}%`);
+    parts.push(`Daily study target: ${profile.daily_study_target_hours ?? 4}h`);
     if (profile.has_funding_condition && profile.funding_condition) {
       parts.push(`Funding condition: ${profile.funding_condition}`);
     }
   }
 
-  // ── Modules & Assessments ────────────────────────────────────────────────
-  const { data: modules } = await supabase
-    .from('modules')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('archived', false);
-  const mods = (modules || []) as Module[];
-
-  const { data: assessments } = await supabase
-    .from('assessments')
-    .select('*')
-    .eq('user_id', userId);
-  const allAssessments = (assessments || []) as Assessment[];
-
-  if (mods.length > 0) {
+  // ── Modules + computed stats ─────────────────────────────────────────────
+  if (mods.length) {
     parts.push(`\n=== MODULES & GRADES ===`);
+    let overallEarned = 0, overallSubmitted = 0;
     for (const m of mods) {
-      const mAssessments = allAssessments.filter(a => a.module_id === m.id);
-      const submitted = mAssessments.filter(a => a.submitted && a.mark_achieved !== null);
-      const pending = mAssessments.filter(a => !a.submitted);
+      const stats = moduleStats(allAssessments.filter(a => a.module_id === m.id), target);
+      overallEarned += stats.submitted.reduce(
+        (s, a) => s + ((a.mark_achieved! / (a.max_mark || 100)) * 100 * a.weight_percent), 0);
+      overallSubmitted += stats.submittedWeight;
 
-      let avg = 'No grades yet';
-      if (submitted.length > 0) {
-        const totalWeight = submitted.reduce((s, a) => s + a.weight_percent, 0);
-        if (totalWeight > 0) {
-          const weightedAvg = submitted.reduce(
-            (s, a) => s + ((a.mark_achieved! / (a.max_mark || 100)) * 100 * a.weight_percent), 0
-          ) / totalWeight;
-          avg = `${Math.round(weightedAvg)}%`;
-        }
+      const avgStr = stats.currentAvg !== null ? `${Math.round(stats.currentAvg)}%` : 'no marks yet';
+      const remStr = stats.pendingWeight > 0
+        ? `; need avg ${stats.neededOnRemaining !== null ? Math.round(stats.neededOnRemaining) : '?'}% on remaining ${Math.round(stats.pendingWeight)}% to hit ${target}%`
+        : '';
+      parts.push(`\n${m.name} (${m.code}, ${m.credit_weight}cr) — current ${avgStr}${remStr}`);
+      for (const a of stats.submitted) {
+        const pct = Math.round((a.mark_achieved! / (a.max_mark || 100)) * 100);
+        parts.push(`  ✓ ${a.name} (${a.type}, ${a.weight_percent}%): ${a.mark_achieved}/${a.max_mark} = ${pct}%`);
       }
-
-      parts.push(`\nModule: ${m.name} (${m.code}) — ${m.credit_weight} credits`);
-      parts.push(`  Current average: ${avg}`);
-      if (submitted.length > 0) {
-        parts.push(`  Submitted assessments:`);
-        for (const a of submitted) {
-          const pct = Math.round((a.mark_achieved! / (a.max_mark || 100)) * 100);
-          parts.push(`    - ${a.name} (${a.type}, ${a.weight_percent}%): ${a.mark_achieved}/${a.max_mark} = ${pct}%`);
-        }
+      for (const a of stats.pending) {
+        const due = a.due_date ? `, due ${format(new Date(a.due_date), 'MMM d')}` : '';
+        parts.push(`  ○ ${a.name} (${a.type}, ${a.weight_percent}%${due})`);
       }
-      if (pending.length > 0) {
-        parts.push(`  Pending assessments:`);
-        for (const a of pending) {
-          const dueStr = a.due_date
-            ? `, due ${format(new Date(a.due_date), 'MMM d yyyy')}`
-            : '';
-          parts.push(`    - ${a.name} (${a.type}, ${a.weight_percent}%${dueStr})`);
-        }
-      }
+    }
+    if (overallSubmitted > 0) {
+      const overall = Math.round(overallEarned / overallSubmitted);
+      const status = overall >= target ? '🟢 on track' : overall >= target - 10 ? '🟡 below target' : '🔴 well below target';
+      parts.push(`\nOverall weighted avg (submitted only): ${overall}% — ${status} (target ${target}%)`);
     }
   }
 
-  // ── Upcoming assessments ─────────────────────────────────────────────────
+  // ── Upcoming assessments (beyond this week) ──────────────────────────────
   const upcoming = allAssessments
-    .filter(a => a.due_date && !a.submitted && new Date(a.due_date) > new Date())
+    .filter(a => a.due_date && !a.submitted && new Date(a.due_date) > weekAhead)
     .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
     .slice(0, 10);
-
-  if (upcoming.length > 0) {
-    parts.push(`\n=== UPCOMING ASSESSMENTS ===`);
+  if (upcoming.length) {
+    parts.push(`\n=== UPCOMING (>1 week away) ===`);
     for (const a of upcoming) {
-      const mod = mods.find(m => m.id === a.module_id);
-      const days = Math.ceil((new Date(a.due_date!).getTime() - Date.now()) / 86400000);
-      parts.push(`- ${a.name} (${mod?.name || 'Unknown'}) — ${a.type}, ${a.weight_percent}%, in ${days} days`);
+      const m = mods.find(x => x.id === a.module_id);
+      const days = Math.ceil((new Date(a.due_date!).getTime() - now.getTime()) / 86400000);
+      parts.push(`- ${a.name} [${m?.name || '?'}] ${a.weight_percent}% — in ${days}d`);
     }
   }
 
-  // ── Timetable ────────────────────────────────────────────────────────────
-  const { data: timetable } = await supabase
-    .from('timetable_entries')
-    .select('*')
-    .eq('user_id', userId)
-    .order('start_time');
-
-  if (timetable && timetable.length > 0) {
-    const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    parts.push(`\n=== TIMETABLE ===`);
-    for (const e of timetable) {
-      const mod = mods.find(m => m.id === e.module_id);
-      const entryType = (e as any).entry_type;
-      const specificDate = (e as any).specific_date;
-      const recurrence = (e as any).recurrence;
-      const schedule = entryType === 'once' && specificDate
-        ? `Once on ${specificDate}`
-        : `Every ${DAY_NAMES[e.day_of_week]} (${recurrence ?? 'weekly'})`;
-      parts.push(`- ${e.title} | ${schedule} | ${e.start_time}–${e.end_time}${e.location ? ` @ ${e.location}` : ''}${mod ? ` [${mod.name}]` : ''}`);
-    }
-  }
-
-  // ── Study sessions (last 30 days) ────────────────────────────────────────
-  const monthAgo = subDays(new Date(), 30);
-  const { data: sessions } = await supabase
-    .from('study_sessions')
-    .select('*')
-    .eq('user_id', userId)
-    .gte('started_at', monthAgo.toISOString())
-    .order('started_at', { ascending: false });
-
-  const weekSessions = ((sessions || []) as StudySession[]).filter(
-    s => new Date(s.started_at) >= subDays(new Date(), 7)
-  );
-  const weekHours = weekSessions.reduce((s, se) => s + (se.duration_minutes || 0), 0) / 60;
-  const monthHours = ((sessions || []) as StudySession[]).reduce(
-    (s, se) => s + (se.duration_minutes || 0), 0
-  ) / 60;
-
-  parts.push(`\n=== STUDY ACTIVITY ===`);
-  parts.push(`Study hours this week: ${Math.round(weekHours * 10) / 10}h (target: ${(profile?.daily_study_target_hours || 4) * 7}h/week)`);
-  parts.push(`Study hours this month: ${Math.round(monthHours * 10) / 10}h`);
-
-  // Streak
-  const { data: allSessionDates } = await supabase
-    .from('study_sessions')
-    .select('started_at')
-    .eq('user_id', userId);
-  if (allSessionDates && allSessionDates.length > 0) {
-    const dates = [...new Set(
-      allSessionDates.map(s => format(new Date(s.started_at), 'yyyy-MM-dd'))
-    )].sort().reverse();
-    let streak = 0;
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
-    if (dates[0] === today || dates[0] === yesterday) {
-      for (let i = 0; i < dates.length; i++) {
-        const expected = format(subDays(new Date(), i + (dates[0] === yesterday ? 1 : 0)), 'yyyy-MM-dd');
-        if (dates[i] === expected) streak++;
-        else break;
+  // ── Weekly timetable summary (compact) ───────────────────────────────────
+  if (timetable.length) {
+    parts.push(`\n=== WEEKLY TIMETABLE ===`);
+    for (let d = 0; d < 7; d++) {
+      const dayItems = timetable.filter((e: any) => e.day_of_week === d && e.entry_type !== 'once');
+      if (dayItems.length) {
+        parts.push(`${DAY_NAMES[d]}: ${dayItems.map((e: any) =>
+          `${e.start_time}-${e.end_time} ${e.title}${e.location ? ` @${e.location}` : ''}`
+        ).join(' | ')}`);
       }
     }
-    parts.push(`Current study streak: ${streak} days`);
   }
 
-  // Recent sessions summary by module
-  if (weekSessions.length > 0) {
+  // ── Study activity ───────────────────────────────────────────────────────
+  const weekSessions = sessions.filter(s => new Date(s.started_at) >= subDays(now, 7));
+  const weekHours = weekSessions.reduce((s, se) => s + (se.duration_minutes || 0), 0) / 60;
+  const monthHours = sessions.reduce((s, se) => s + (se.duration_minutes || 0), 0) / 60;
+  const weeklyTarget = (profile?.daily_study_target_hours || 4) * 7;
+
+  parts.push(`\n=== STUDY ACTIVITY ===`);
+  const pace = weeklyTarget > 0 ? Math.round((weekHours / weeklyTarget) * 100) : 0;
+  parts.push(`This week: ${weekHours.toFixed(1)}h / ${weeklyTarget}h target (${pace}%)`);
+  parts.push(`Last 30d: ${monthHours.toFixed(1)}h, ${sessions.length} session(s)`);
+
+  // Streak
+  if (allDates.length > 0) {
+    const dates = [...new Set(allDates.map(s => format(new Date(s.started_at), 'yyyy-MM-dd')))].sort().reverse();
+    let streak = 0;
+    const today = format(now, 'yyyy-MM-dd');
+    const yest = format(subDays(now, 1), 'yyyy-MM-dd');
+    if (dates[0] === today || dates[0] === yest) {
+      const offset = dates[0] === yest ? 1 : 0;
+      for (let i = 0; i < dates.length; i++) {
+        const expected = format(subDays(now, i + offset), 'yyyy-MM-dd');
+        if (dates[i] === expected) streak++; else break;
+      }
+    }
+    parts.push(`Streak: ${streak} day(s)`);
+  }
+
+  if (weekSessions.length) {
     const byModule: Record<string, number> = {};
     for (const s of weekSessions) {
-      const mod = mods.find(m => m.id === s.module_id);
-      const key = mod?.name || 'Unknown';
-      byModule[key] = (byModule[key] || 0) + (s.duration_minutes || 0);
+      const m = mods.find(x => x.id === s.module_id);
+      const k = m?.name || 'Other';
+      byModule[k] = (byModule[k] || 0) + (s.duration_minutes || 0);
     }
-    parts.push(`This week's study breakdown:`);
-    for (const [name, mins] of Object.entries(byModule)) {
-      parts.push(`  - ${name}: ${Math.round(mins / 60 * 10) / 10}h`);
-    }
+    parts.push(`This week by module: ${Object.entries(byModule)
+      .map(([n, m]) => `${n} ${(m / 60).toFixed(1)}h`).join(' | ')}`);
   }
 
   // ── Goals ────────────────────────────────────────────────────────────────
-  const { data: goals } = await supabase
-    .from('goals')
-    .select('*')
-    .eq('user_id', userId);
-
-  if (goals && goals.length > 0) {
-    const active = (goals as any[]).filter(g => !g.achieved);
-    const achieved = (goals as any[]).filter(g => g.achieved);
-    if (active.length > 0) {
+  if (goals.length) {
+    const active = goals.filter(g => !g.achieved);
+    const done = goals.filter(g => g.achieved);
+    if (active.length) {
       parts.push(`\n=== ACTIVE GOALS ===`);
       for (const g of active) {
-        parts.push(`- ${g.title} (${g.type})${g.target_value ? `: ${g.current_value || 0}/${g.target_value}` : ''}${g.deadline ? `, deadline ${format(new Date(g.deadline), 'MMM d yyyy')}` : ''}`);
+        const prog = g.target_value ? ` (${g.current_value || 0}/${g.target_value})` : '';
+        const dl = g.deadline ? `, by ${format(new Date(g.deadline), 'MMM d yyyy')}` : '';
+        parts.push(`- ${g.title} [${g.type}]${prog}${dl}`);
       }
     }
-    if (achieved.length > 0) {
-      parts.push(`Achieved goals: ${achieved.map((g: any) => g.title).join(', ')}`);
-    }
+    if (done.length) parts.push(`Achieved: ${done.length} goal(s)`);
   }
 
-  // ── Tasks ─────────────────────────────────────────────────────────────────
-  const { data: tasksData } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('user_id', userId);
-
-  if (tasksData && tasksData.length > 0) {
-    const activeTasks = (tasksData as any[]).filter(t => t.status !== 'done');
-    const doneTasks = (tasksData as any[]).filter(t => t.status === 'done');
-    if (activeTasks.length > 0) {
-      parts.push(`\n=== ACTIVE TASKS ===`);
-      for (const t of activeTasks) {
-        const mod = mods.find(m => m.id === t.module_id);
-        const statusLabel = t.status === 'not_started' ? 'Not started' : t.status === 'in_progress' ? 'In progress' : 'Almost done';
-        const dueStr = t.due_date ? `, due ${format(new Date(t.due_date), 'MMM d yyyy')}` : '';
-        const timeStr = t.time_logged_minutes > 0 ? `, ${Math.round(t.time_logged_minutes)}min logged` : '';
-        parts.push(`- ${t.title} [${mod?.name || 'Unknown'}] — ${statusLabel}${dueStr}${timeStr}`);
-      }
+  // ── Tasks (active) ───────────────────────────────────────────────────────
+  const activeTasks = tasks.filter(t => t.status !== 'done');
+  if (activeTasks.length) {
+    parts.push(`\n=== ACTIVE TASKS (${activeTasks.length}) ===`);
+    for (const t of activeTasks.slice(0, 20)) {
+      const m = mods.find(x => x.id === t.module_id);
+      const status = t.status === 'not_started' ? 'todo' : t.status === 'in_progress' ? 'doing' : 'almost done';
+      const due = t.due_date ? `, due ${format(new Date(t.due_date), 'MMM d')}` : '';
+      const time = t.time_logged_minutes > 0 ? ` (${Math.round(t.time_logged_minutes)}m logged)` : '';
+      parts.push(`- ${t.title} [${m?.name || '?'}] ${status}${due}${time}`);
     }
-    if (doneTasks.length > 0) {
-      parts.push(`Completed tasks: ${doneTasks.length}`);
-    }
+    if (activeTasks.length > 20) parts.push(`...and ${activeTasks.length - 20} more`);
   }
 
-  // ── Uploaded study materials ─────────────────────────────────────────────
-  const { data: files } = await supabase
-    .from('uploaded_files')
-    .select('file_name, module_id, extracted_text')
-    .eq('user_id', userId)
-    .order('upload_date', { ascending: false });
-
-  if (files && files.length > 0) {
-    const filesWithText = (files as any[]).filter(f => f.extracted_text);
-    if (filesWithText.length > 0) {
-      parts.push(`\n=== STUDY MATERIALS ===`);
-      for (const f of filesWithText) {
-        const mod = mods.find(m => m.id === f.module_id);
-        parts.push(`File: ${f.file_name}${mod ? ` [${mod.name}]` : ''}`);
-        parts.push(f.extracted_text.substring(0, 3000));
-      }
-    }
+  // ── Uploaded materials (lean — names only by default) ────────────────────
+  if (files.length) {
+    parts.push(`\n=== UPLOADED FILES (${files.length}) ===`);
+    parts.push(files.slice(0, 15).map(f => {
+      const m = mods.find(x => x.id === f.module_id);
+      return `${f.file_name}${m ? ` [${m.name}]` : ''}`;
+    }).join(', '));
+    parts.push(`(Full text only injected when a module is focused — see buildModuleContext.)`);
   }
 
   return parts.join('\n');
 }
 
-// ─── Legacy helpers kept for backwards compatibility ─────────────────────────
-
-export async function buildUserContext(userId: string, profile: UserProfile | null): Promise<string> {
-  return buildFullAppContext(userId, profile);
-}
+// ─── Module-focused context (deeper file content for focused module) ─────────
 
 export async function buildModuleContext(userId: string, moduleId: string): Promise<string> {
   const parts: string[] = [];
 
-  const { data: mod } = await supabase.from('modules').select('*').eq('id', moduleId).single();
-  if (!mod) return '';
-  const m = mod as Module;
+  const [modRes, assRes, sesRes, filesRes] = await Promise.all([
+    supabase.from('modules').select('*').eq('id', moduleId).maybeSingle(),
+    supabase.from('assessments').select('*').eq('module_id', moduleId).eq('user_id', userId),
+    supabase.from('study_sessions').select('*').eq('module_id', moduleId).eq('user_id', userId)
+      .order('started_at', { ascending: false }).limit(10),
+    supabase.from('uploaded_files').select('file_name, extracted_text')
+      .eq('user_id', userId).eq('module_id', moduleId)
+      .order('upload_date', { ascending: false }).limit(5),
+  ]);
 
+  if (!modRes.data) return '';
+  const m = modRes.data as Module;
   parts.push(`\n=== FOCUSED MODULE: ${m.name} (${m.code}) ===`);
-  if (m.notes) parts.push(`Module notes: ${m.notes}`);
+  if (m.notes) parts.push(`Notes: ${m.notes}`);
 
-  const { data: assessments } = await supabase
-    .from('assessments').select('*').eq('module_id', moduleId).eq('user_id', userId);
-  if (assessments && assessments.length > 0) {
+  const ass = (assRes.data || []) as Assessment[];
+  if (ass.length) {
     parts.push(`Assessments:`);
-    for (const a of assessments as Assessment[]) {
+    for (const a of ass) {
       parts.push(`- ${a.name} (${a.type}, ${a.weight_percent}%): ${
         a.submitted ? `${a.mark_achieved}/${a.max_mark}` : 'not submitted'
       }${a.due_date ? `, due ${format(new Date(a.due_date), 'MMM d')}` : ''}`);
     }
   }
 
-  const { data: sessions } = await supabase
-    .from('study_sessions').select('*').eq('module_id', moduleId).eq('user_id', userId)
-    .order('started_at', { ascending: false }).limit(10);
-  if (sessions && sessions.length > 0) {
-    parts.push(`Recent study sessions:`);
-    for (const s of sessions as StudySession[]) {
-      parts.push(`- ${format(new Date(s.started_at), 'MMM d')}: ${s.duration_minutes}min, topic: ${s.topic || 'general'}`);
+  const sessions = (sesRes.data || []) as StudySession[];
+  if (sessions.length) {
+    parts.push(`Recent sessions:`);
+    for (const s of sessions) {
+      parts.push(`- ${format(new Date(s.started_at), 'MMM d')}: ${s.duration_minutes}min — ${s.topic || 'general'}`);
+    }
+  }
+
+  const files = (filesRes.data as any[]) || [];
+  const withText = files.filter(f => f.extracted_text);
+  if (withText.length) {
+    parts.push(`\n=== MODULE MATERIALS ===`);
+    // Budget: ~2000 chars per file, max 5 files
+    for (const f of withText) {
+      parts.push(`\n--- ${f.file_name} ---`);
+      parts.push(f.extracted_text.substring(0, 2000));
     }
   }
 
   return parts.join('\n');
 }
+
+// Backwards-compat alias
+export const buildUserContext = buildFullAppContext;

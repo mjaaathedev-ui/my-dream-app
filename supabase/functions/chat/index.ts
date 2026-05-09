@@ -7,224 +7,161 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "add_module",
-      description: "Add a new academic module/course for the student",
-      parameters: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "Module name" },
-          code: { type: "string", description: "Module code e.g. CS201" },
-          credit_weight: { type: "number", description: "Credit weight" },
-          color: { type: "string", description: "Hex color e.g. #2563EB" },
-          semester: { type: "string", description: "Semester e.g. S1 2026" },
-        },
-        required: ["name"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "add_assessment",
-      description: "Add an assessment (test, assignment, exam, practical, project) to a module. Use this when parsing course outlines, syllabi, or when a student mentions upcoming assessments.",
-      parameters: {
-        type: "object",
-        properties: {
-          module_name: { type: "string", description: "Name of the module to add assessment to" },
-          name: { type: "string", description: "Assessment name" },
-          type: { type: "string", enum: ["test", "assignment", "exam", "practical", "project"] },
-          weight_percent: { type: "number", description: "Weight percentage" },
-          due_date: { type: "string", description: "Due date in YYYY-MM-DD format" },
-          max_mark: { type: "number", description: "Maximum mark, default 100" },
-        },
-        required: ["module_name", "name", "type", "weight_percent"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "log_mark",
-      description: "Record a mark/grade for an existing assessment",
-      parameters: {
-        type: "object",
-        properties: {
-          module_name: { type: "string", description: "Module name" },
-          assessment_name: { type: "string", description: "Assessment name" },
-          mark: { type: "number", description: "Mark achieved" },
-        },
-        required: ["module_name", "assessment_name", "mark"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "add_goal",
-      description: "Create a new goal for the student",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          description: { type: "string" },
-          type: { type: "string", enum: ["semester", "module", "career", "funding"] },
-          target_value: { type: "number" },
-          deadline: { type: "string", description: "YYYY-MM-DD" },
-        },
-        required: ["title", "type"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "add_timetable_entry",
-      description: "Add an entry to the student's weekly timetable",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          type: { type: "string", enum: ["class", "tutorial", "practical", "study", "personal", "assessment"] },
-          day_of_week: { type: "number", description: "0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday" },
-          start_time: { type: "string", description: "HH:MM 24-hour format" },
-          end_time: { type: "string", description: "HH:MM 24-hour format" },
-          location: { type: "string" },
-          module_name: { type: "string", description: "Optional module name to link" },
-        },
-        required: ["title", "type", "day_of_week", "start_time", "end_time"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "update_timetable_entry",
-      description: "Update an existing timetable entry. Find by title (and optionally day) then update fields.",
-      parameters: {
-        type: "object",
-        properties: {
-          current_title: { type: "string", description: "Current title of the entry to update" },
-          day_of_week: { type: "number", description: "Day to narrow search: 0=Monday...6=Sunday" },
-          new_title: { type: "string" },
-          new_type: { type: "string", enum: ["class", "tutorial", "practical", "study", "personal", "assessment"] },
-          new_day_of_week: { type: "number", description: "0=Monday...6=Sunday" },
-          new_start_time: { type: "string", description: "HH:MM 24-hour" },
-          new_end_time: { type: "string", description: "HH:MM 24-hour" },
-          new_location: { type: "string" },
-          module_name: { type: "string", description: "Module to link" },
-        },
-        required: ["current_title"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_timetable_entry",
-      description: "Delete a timetable entry by title (and optionally day to narrow it down)",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Title of the entry to delete" },
-          day_of_week: { type: "number", description: "Day to narrow search: 0=Monday...6=Sunday" },
-        },
-        required: ["title"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "log_study_session",
-      description: "Log a completed study session for the student",
-      parameters: {
-        type: "object",
-        properties: {
-          module_name: { type: "string" },
-          duration_minutes: { type: "number" },
-          topic: { type: "string" },
-          energy_level: { type: "number", description: "1-5" },
-        },
-        required: ["module_name", "duration_minutes"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "bulk_create_from_document",
-      description: "Create multiple modules and assessments at once from a parsed document (course outline, syllabus, study guide). Use this when the student uploads a document and you detect modules and assessments.",
-      parameters: {
-        type: "object",
-        properties: {
-          modules: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                code: { type: "string" },
-                credit_weight: { type: "number" },
-                semester: { type: "string" },
-                assessments: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      type: { type: "string", enum: ["test", "assignment", "exam", "practical", "project"] },
-                      weight_percent: { type: "number" },
-                      due_date: { type: "string", description: "YYYY-MM-DD or null" },
-                      max_mark: { type: "number" },
-                      mark_achieved: { type: "number", description: "null if not yet submitted" },
-                    },
-                    required: ["name", "type", "weight_percent"],
-                  },
-                },
-              },
-              required: ["name", "assessments"],
-            },
-          },
-        },
-        required: ["modules"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "create_calendar_events",
-      description: "Create Google Calendar events for assessments with due dates. Only use if the student has Google Calendar connected.",
-      parameters: {
-        type: "object",
-        properties: {
-          events: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string", description: "Event title e.g. [CS201] Test 1 (30%)" },
-                date: { type: "string", description: "YYYY-MM-DD" },
-                description: { type: "string" },
-              },
-              required: ["title", "date"],
-            },
-          },
-        },
-        required: ["events"],
-      },
-    },
-  },
-];
+const MODEL = "google/gemini-2.5-flash";
+const MAX_TOOL_ROUNDS = 5;
 
 const MODULE_COLORS = [
   "#2563EB", "#DC2626", "#16A34A", "#D97706", "#7C3AED",
   "#DB2777", "#0891B2", "#65A30D", "#EA580C", "#4F46E5",
 ];
+
+const TOOLS = [
+  // ── MODULES ───────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "add_module",
+    description: "Add a new academic module/course",
+    parameters: { type: "object", properties: {
+      name: { type: "string" }, code: { type: "string" },
+      credit_weight: { type: "number" }, color: { type: "string" }, semester: { type: "string" },
+    }, required: ["name"] } } },
+  { type: "function", function: { name: "update_module",
+    description: "Update an existing module (rename, change credits, color, semester, notes)",
+    parameters: { type: "object", properties: {
+      current_name: { type: "string", description: "Current module name or code" },
+      new_name: { type: "string" }, new_code: { type: "string" },
+      credit_weight: { type: "number" }, color: { type: "string" },
+      semester: { type: "string" }, notes: { type: "string" },
+    }, required: ["current_name"] } } },
+  { type: "function", function: { name: "delete_module",
+    description: "Archive (soft-delete) a module. Use when student dropped a course.",
+    parameters: { type: "object", properties: {
+      name: { type: "string", description: "Module name or code" },
+    }, required: ["name"] } } },
+
+  // ── ASSESSMENTS ───────────────────────────────────────────────────────────
+  { type: "function", function: { name: "add_assessment",
+    description: "Add a test/assignment/exam/practical/project to a module",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, name: { type: "string" },
+      type: { type: "string", enum: ["test","assignment","exam","practical","project"] },
+      weight_percent: { type: "number" }, due_date: { type: "string", description: "YYYY-MM-DD" },
+      max_mark: { type: "number" },
+    }, required: ["module_name","name","type","weight_percent"] } } },
+  { type: "function", function: { name: "update_assessment",
+    description: "Update an existing assessment (rename, change due date, weight, max mark)",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, current_name: { type: "string" },
+      new_name: { type: "string" }, new_type: { type: "string", enum: ["test","assignment","exam","practical","project"] },
+      due_date: { type: "string", description: "YYYY-MM-DD" },
+      weight_percent: { type: "number" }, max_mark: { type: "number" },
+    }, required: ["module_name","current_name"] } } },
+  { type: "function", function: { name: "delete_assessment",
+    description: "Delete an assessment from a module",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, assessment_name: { type: "string" },
+    }, required: ["module_name","assessment_name"] } } },
+  { type: "function", function: { name: "log_mark",
+    description: "Record a mark for an existing assessment",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, assessment_name: { type: "string" }, mark: { type: "number" },
+    }, required: ["module_name","assessment_name","mark"] } } },
+
+  // ── GOALS ─────────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "add_goal",
+    description: "Create a goal",
+    parameters: { type: "object", properties: {
+      title: { type: "string" }, description: { type: "string" },
+      type: { type: "string", enum: ["semester","module","career","funding"] },
+      target_value: { type: "number" }, deadline: { type: "string", description: "YYYY-MM-DD" },
+    }, required: ["title","type"] } } },
+  { type: "function", function: { name: "complete_goal",
+    description: "Mark a goal as achieved",
+    parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } } },
+
+  // ── TASKS ─────────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "add_task",
+    description: "Add a task to a module's todo list",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, title: { type: "string" }, notes: { type: "string" },
+      due_date: { type: "string", description: "YYYY-MM-DD" },
+    }, required: ["module_name","title"] } } },
+  { type: "function", function: { name: "update_task",
+    description: "Update task title, status, due date, or notes",
+    parameters: { type: "object", properties: {
+      current_title: { type: "string" },
+      new_title: { type: "string" }, new_notes: { type: "string" },
+      status: { type: "string", enum: ["not_started","in_progress","almost_done","done"] },
+      due_date: { type: "string", description: "YYYY-MM-DD" },
+    }, required: ["current_title"] } } },
+  { type: "function", function: { name: "delete_task",
+    description: "Delete a task by title",
+    parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } } },
+
+  // ── TIMETABLE ─────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "add_timetable_entry",
+    description: "Add weekly timetable entry. day_of_week: 0=Mon..6=Sun",
+    parameters: { type: "object", properties: {
+      title: { type: "string" },
+      type: { type: "string", enum: ["class","tutorial","practical","study","personal","assessment"] },
+      day_of_week: { type: "number" }, start_time: { type: "string" }, end_time: { type: "string" },
+      location: { type: "string" }, module_name: { type: "string" },
+    }, required: ["title","type","day_of_week","start_time","end_time"] } } },
+  { type: "function", function: { name: "update_timetable_entry",
+    description: "Update an existing timetable entry",
+    parameters: { type: "object", properties: {
+      current_title: { type: "string" }, day_of_week: { type: "number" },
+      new_title: { type: "string" }, new_type: { type: "string", enum: ["class","tutorial","practical","study","personal","assessment"] },
+      new_day_of_week: { type: "number" }, new_start_time: { type: "string" }, new_end_time: { type: "string" },
+      new_location: { type: "string" }, module_name: { type: "string" },
+    }, required: ["current_title"] } } },
+  { type: "function", function: { name: "delete_timetable_entry",
+    description: "Delete a timetable entry by title",
+    parameters: { type: "object", properties: {
+      title: { type: "string" }, day_of_week: { type: "number" },
+    }, required: ["title"] } } },
+
+  // ── STUDY SESSIONS ────────────────────────────────────────────────────────
+  { type: "function", function: { name: "log_study_session",
+    description: "Log a completed study session",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, duration_minutes: { type: "number" },
+      topic: { type: "string" }, energy_level: { type: "number", description: "1-5" },
+    }, required: ["module_name","duration_minutes"] } } },
+
+  // ── BULK + CALENDAR ───────────────────────────────────────────────────────
+  { type: "function", function: { name: "bulk_create_from_document",
+    description: "Bulk create modules + assessments from a parsed document",
+    parameters: { type: "object", properties: {
+      modules: { type: "array", items: { type: "object", properties: {
+        name: { type: "string" }, code: { type: "string" },
+        credit_weight: { type: "number" }, semester: { type: "string" },
+        assessments: { type: "array", items: { type: "object", properties: {
+          name: { type: "string" }, type: { type: "string", enum: ["test","assignment","exam","practical","project"] },
+          weight_percent: { type: "number" }, due_date: { type: "string" },
+          max_mark: { type: "number" }, mark_achieved: { type: "number" },
+        }, required: ["name","type","weight_percent"] } },
+      }, required: ["name","assessments"] } },
+    }, required: ["modules"] } } },
+  { type: "function", function: { name: "create_calendar_events",
+    description: "Create Google Calendar events. Only call if Google Calendar is connected.",
+    parameters: { type: "object", properties: {
+      events: { type: "array", items: { type: "object", properties: {
+        title: { type: "string" }, date: { type: "string", description: "YYYY-MM-DD" },
+        description: { type: "string" },
+      }, required: ["title","date"] } },
+    }, required: ["events"] } } },
+];
+
+// ─── helpers ───────────────────────────────────────────────────────────────
+const findModule = (modules: any[], name: string) => {
+  if (!name) return null;
+  const lower = name.toLowerCase();
+  return modules.find((m: any) =>
+    m.name?.toLowerCase() === lower ||
+    m.code?.toLowerCase() === lower ||
+    m.name?.toLowerCase().includes(lower) ||
+    lower.includes(m.name?.toLowerCase())
+  );
+};
 
 async function executeTool(
   supabaseAdmin: any,
@@ -233,296 +170,305 @@ async function executeTool(
   args: any,
   modules: any[]
 ): Promise<string> {
-  const findModule = (name: string) => {
-    const lower = name.toLowerCase();
-    return modules.find(
-      (m: any) =>
-        m.name.toLowerCase() === lower ||
-        m.code.toLowerCase() === lower ||
-        m.name.toLowerCase().includes(lower) ||
-        lower.includes(m.name.toLowerCase())
-    );
-  };
-
-  switch (toolName) {
-    case "add_module": {
-      const { data, error } = await supabaseAdmin
-        .from("modules")
-        .insert({
-          user_id: userId,
-          name: args.name,
-          code: args.code || "",
+  try {
+    switch (toolName) {
+      case "add_module": {
+        const { data, error } = await supabaseAdmin.from("modules").insert({
+          user_id: userId, name: args.name, code: args.code || "",
           credit_weight: args.credit_weight || 16,
           color: args.color || MODULE_COLORS[modules.length % MODULE_COLORS.length],
-          semester: args.semester || "",
-          sort_order: modules.length,
-        })
-        .select()
-        .single();
-      if (error) return `Error adding module: ${error.message}`;
-      modules.push(data);
-      return `✅ Module "${args.name}" added successfully.`;
-    }
-    case "add_assessment": {
-      const mod = findModule(args.module_name);
-      if (!mod) return `❌ Module "${args.module_name}" not found. Available: ${modules.map((m: any) => m.name).join(", ")}`;
-      const { error } = await supabaseAdmin.from("assessments").insert({
-        user_id: userId,
-        module_id: mod.id,
-        name: args.name,
-        type: args.type,
-        weight_percent: args.weight_percent,
-        due_date: args.due_date || null,
-        max_mark: args.max_mark || 100,
-      });
-      if (error) return `Error: ${error.message}`;
-      return `✅ Assessment "${args.name}" (${args.type}, ${args.weight_percent}%) added to ${mod.name}.${args.due_date ? ` Due: ${args.due_date}` : ''}`;
-    }
-    case "log_mark": {
-      const mod = findModule(args.module_name);
-      if (!mod) return `❌ Module "${args.module_name}" not found.`;
-      const { data: assessments } = await supabaseAdmin
-        .from("assessments")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("module_id", mod.id);
-      const assessment = (assessments || []).find(
-        (a: any) =>
-          a.name.toLowerCase().includes(args.assessment_name.toLowerCase()) ||
-          args.assessment_name.toLowerCase().includes(a.name.toLowerCase())
-      );
-      if (!assessment) return `❌ Assessment "${args.assessment_name}" not found in ${mod.name}.`;
-      const { error } = await supabaseAdmin
-        .from("assessments")
-        .update({ mark_achieved: args.mark, submitted: true })
-        .eq("id", assessment.id);
-      if (error) return `Error: ${error.message}`;
-      return `✅ Mark ${args.mark}/${assessment.max_mark} recorded for "${assessment.name}".`;
-    }
-    case "add_goal": {
-      const { error } = await supabaseAdmin.from("goals").insert({
-        user_id: userId,
-        title: args.title,
-        description: args.description || "",
-        type: args.type,
-        target_value: args.target_value || null,
-        deadline: args.deadline || null,
-      });
-      if (error) return `Error: ${error.message}`;
-      return `✅ Goal "${args.title}" created.`;
-    }
-    case "add_timetable_entry": {
-      let moduleId = null;
-      if (args.module_name) {
-        const mod = findModule(args.module_name);
-        if (mod) moduleId = mod.id;
+          semester: args.semester || "", sort_order: modules.length,
+        }).select().single();
+        if (error) return `Error adding module: ${error.message}`;
+        modules.push(data);
+        return `✅ Module "${args.name}" added.`;
       }
-      const { error } = await supabaseAdmin.from("timetable_entries").insert({
-        user_id: userId,
-        title: args.title,
-        type: args.type,
-        day_of_week: args.day_of_week,
-        start_time: args.start_time,
-        end_time: args.end_time,
-        location: args.location || "",
-        module_id: moduleId,
-      });
-      if (error) return `Error: ${error.message}`;
-      const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-      return `✅ Timetable entry "${args.title}" added on ${dayNames[args.day_of_week]} ${args.start_time}–${args.end_time}.`;
-    }
-    case "update_timetable_entry": {
-      const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-      let query = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.current_title}%`);
-      if (args.day_of_week !== undefined) query = query.eq("day_of_week", args.day_of_week);
-      const { data: entries } = await query;
-      if (!entries || entries.length === 0) return `❌ No timetable entry found matching "${args.current_title}".`;
-      const entry = entries[0];
-      const updates: any = {};
-      if (args.new_title) updates.title = args.new_title;
-      if (args.new_type) updates.type = args.new_type;
-      if (args.new_day_of_week !== undefined) updates.day_of_week = args.new_day_of_week;
-      if (args.new_start_time) updates.start_time = args.new_start_time;
-      if (args.new_end_time) updates.end_time = args.new_end_time;
-      if (args.new_location !== undefined) updates.location = args.new_location;
-      if (args.module_name) {
-        const mod = findModule(args.module_name);
-        if (mod) updates.module_id = mod.id;
+      case "update_module": {
+        const mod = findModule(modules, args.current_name);
+        if (!mod) return `❌ Module "${args.current_name}" not found.`;
+        const updates: any = {};
+        if (args.new_name) updates.name = args.new_name;
+        if (args.new_code) updates.code = args.new_code;
+        if (args.credit_weight != null) updates.credit_weight = args.credit_weight;
+        if (args.color) updates.color = args.color;
+        if (args.semester) updates.semester = args.semester;
+        if (args.notes != null) updates.notes = args.notes;
+        if (!Object.keys(updates).length) return `⚠️ No changes specified.`;
+        const { error } = await supabaseAdmin.from("modules").update(updates).eq("id", mod.id);
+        if (error) return `Error: ${error.message}`;
+        Object.assign(mod, updates);
+        return `✅ Updated module "${mod.name}".`;
       }
-      if (Object.keys(updates).length === 0) return `⚠️ No changes specified for "${args.current_title}".`;
-      const { error } = await supabaseAdmin.from("timetable_entries").update(updates).eq("id", entry.id);
-      if (error) return `Error: ${error.message}`;
-      return `✅ Updated "${entry.title}"${updates.day_of_week !== undefined ? ` → ${dayNames[updates.day_of_week]}` : ''}${updates.start_time ? ` ${updates.start_time}–${updates.end_time || entry.end_time}` : ''}.`;
-    }
-    case "delete_timetable_entry": {
-      let query = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.title}%`);
-      if (args.day_of_week !== undefined) query = query.eq("day_of_week", args.day_of_week);
-      const { data: entries } = await query;
-      if (!entries || entries.length === 0) return `❌ No timetable entry found matching "${args.title}".`;
-      const entry = entries[0];
-      const { error } = await supabaseAdmin.from("timetable_entries").delete().eq("id", entry.id);
-      if (error) return `Error: ${error.message}`;
-      return `✅ Deleted timetable entry "${entry.title}".`;
-    }
-    case "log_study_session": {
-      const mod = findModule(args.module_name);
-      if (!mod) return `❌ Module "${args.module_name}" not found.`;
-      const now = new Date();
-      const started = new Date(now.getTime() - args.duration_minutes * 60000);
-      const { error } = await supabaseAdmin.from("study_sessions").insert({
-        user_id: userId,
-        module_id: mod.id,
-        started_at: started.toISOString(),
-        ended_at: now.toISOString(),
-        duration_minutes: args.duration_minutes,
-        topic: args.topic || "",
-        energy_level: args.energy_level || 3,
-        session_type: "custom",
-      });
-      if (error) return `Error: ${error.message}`;
-      return `✅ Study session (${args.duration_minutes}min) logged for ${mod.name}.`;
-    }
-    case "bulk_create_from_document": {
-      const results: string[] = [];
-      for (const modData of args.modules || []) {
-        // Check if module exists
-        let mod = findModule(modData.name) || (modData.code ? findModule(modData.code) : null);
-        
-        if (!mod) {
-          const { data, error } = await supabaseAdmin.from("modules").insert({
-            user_id: userId,
-            name: modData.name,
-            code: modData.code || "",
-            credit_weight: modData.credit_weight || 16,
-            color: MODULE_COLORS[modules.length % MODULE_COLORS.length],
-            semester: modData.semester || "",
-            sort_order: modules.length,
-          }).select().single();
-          if (error) {
-            results.push(`❌ Failed to create module "${modData.name}": ${error.message}`);
-            continue;
-          }
-          mod = data;
-          modules.push(data);
-          results.push(`✅ Module "${modData.name}" created.`);
-        } else {
-          results.push(`📝 Module "${modData.name}" already exists.`);
+      case "delete_module": {
+        const mod = findModule(modules, args.name);
+        if (!mod) return `❌ Module "${args.name}" not found.`;
+        const { error } = await supabaseAdmin.from("modules").update({ archived: true }).eq("id", mod.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Module "${mod.name}" archived.`;
+      }
+      case "add_assessment": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found. Available: ${modules.map((m:any)=>m.name).join(", ")}`;
+        const { error } = await supabaseAdmin.from("assessments").insert({
+          user_id: userId, module_id: mod.id, name: args.name, type: args.type,
+          weight_percent: args.weight_percent, due_date: args.due_date || null,
+          max_mark: args.max_mark || 100,
+        });
+        if (error) return `Error: ${error.message}`;
+        return `✅ "${args.name}" (${args.type}, ${args.weight_percent}%) added to ${mod.name}.${args.due_date ? ` Due ${args.due_date}.` : ''}`;
+      }
+      case "update_assessment": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found.`;
+        const { data: rows } = await supabaseAdmin.from("assessments").select("*")
+          .eq("user_id", userId).eq("module_id", mod.id);
+        const a = (rows || []).find((r: any) =>
+          r.name.toLowerCase().includes(args.current_name.toLowerCase()) ||
+          args.current_name.toLowerCase().includes(r.name.toLowerCase()));
+        if (!a) return `❌ Assessment "${args.current_name}" not found in ${mod.name}.`;
+        const updates: any = {};
+        if (args.new_name) updates.name = args.new_name;
+        if (args.new_type) updates.type = args.new_type;
+        if (args.due_date != null) updates.due_date = args.due_date;
+        if (args.weight_percent != null) updates.weight_percent = args.weight_percent;
+        if (args.max_mark != null) updates.max_mark = args.max_mark;
+        if (!Object.keys(updates).length) return `⚠️ No changes specified.`;
+        const { error } = await supabaseAdmin.from("assessments").update(updates).eq("id", a.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Updated assessment "${a.name}".`;
+      }
+      case "delete_assessment": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found.`;
+        const { data: rows } = await supabaseAdmin.from("assessments").select("*")
+          .eq("user_id", userId).eq("module_id", mod.id);
+        const a = (rows || []).find((r: any) =>
+          r.name.toLowerCase().includes(args.assessment_name.toLowerCase()));
+        if (!a) return `❌ Assessment "${args.assessment_name}" not found.`;
+        const { error } = await supabaseAdmin.from("assessments").delete().eq("id", a.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Deleted assessment "${a.name}".`;
+      }
+      case "log_mark": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found.`;
+        const { data: rows } = await supabaseAdmin.from("assessments").select("*")
+          .eq("user_id", userId).eq("module_id", mod.id);
+        const a = (rows || []).find((r: any) =>
+          r.name.toLowerCase().includes(args.assessment_name.toLowerCase()) ||
+          args.assessment_name.toLowerCase().includes(r.name.toLowerCase()));
+        if (!a) return `❌ Assessment "${args.assessment_name}" not found in ${mod.name}.`;
+        const { error } = await supabaseAdmin.from("assessments")
+          .update({ mark_achieved: args.mark, submitted: true }).eq("id", a.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Mark ${args.mark}/${a.max_mark} recorded for "${a.name}".`;
+      }
+      case "add_goal": {
+        const { error } = await supabaseAdmin.from("goals").insert({
+          user_id: userId, title: args.title, description: args.description || "",
+          type: args.type, target_value: args.target_value || null,
+          deadline: args.deadline || null,
+        });
+        if (error) return `Error: ${error.message}`;
+        return `✅ Goal "${args.title}" created.`;
+      }
+      case "complete_goal": {
+        const { data: rows } = await supabaseAdmin.from("goals").select("*").eq("user_id", userId);
+        const g = (rows || []).find((r: any) =>
+          r.title.toLowerCase().includes(args.title.toLowerCase()) ||
+          args.title.toLowerCase().includes(r.title.toLowerCase()));
+        if (!g) return `❌ Goal "${args.title}" not found.`;
+        const { error } = await supabaseAdmin.from("goals")
+          .update({ achieved: true }).eq("id", g.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Goal "${g.title}" marked achieved. 🎉`;
+      }
+      case "add_task": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found.`;
+        const { error } = await supabaseAdmin.from("tasks").insert({
+          user_id: userId, module_id: mod.id, title: args.title,
+          notes: args.notes || "", due_date: args.due_date || null,
+          status: "not_started",
+        });
+        if (error) return `Error: ${error.message}`;
+        return `✅ Task "${args.title}" added to ${mod.name}.`;
+      }
+      case "update_task": {
+        const { data: rows } = await supabaseAdmin.from("tasks").select("*").eq("user_id", userId);
+        const t = (rows || []).find((r: any) =>
+          r.title.toLowerCase().includes(args.current_title.toLowerCase()));
+        if (!t) return `❌ Task "${args.current_title}" not found.`;
+        const updates: any = {};
+        if (args.new_title) updates.title = args.new_title;
+        if (args.new_notes != null) updates.notes = args.new_notes;
+        if (args.status) updates.status = args.status;
+        if (args.due_date != null) updates.due_date = args.due_date;
+        if (!Object.keys(updates).length) return `⚠️ No changes specified.`;
+        const { error } = await supabaseAdmin.from("tasks").update(updates).eq("id", t.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Updated task "${t.title}".`;
+      }
+      case "delete_task": {
+        const { data: rows } = await supabaseAdmin.from("tasks").select("*").eq("user_id", userId);
+        const t = (rows || []).find((r: any) =>
+          r.title.toLowerCase().includes(args.title.toLowerCase()));
+        if (!t) return `❌ Task "${args.title}" not found.`;
+        const { error } = await supabaseAdmin.from("tasks").delete().eq("id", t.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Deleted task "${t.title}".`;
+      }
+      case "add_timetable_entry": {
+        let moduleId = null;
+        if (args.module_name) {
+          const m = findModule(modules, args.module_name); if (m) moduleId = m.id;
         }
-
-        // Add assessments
-        const assessments = modData.assessments || [];
-        if (assessments.length > 0) {
-          const rows = assessments.map((a: any) => ({
-            user_id: userId,
-            module_id: mod.id,
-            name: a.name,
-            type: a.type || "assignment",
-            weight_percent: a.weight_percent || 0,
-            due_date: a.due_date || null,
-            max_mark: a.max_mark || 100,
-            mark_achieved: a.mark_achieved ?? null,
-            submitted: a.mark_achieved != null,
-          }));
-          const { error } = await supabaseAdmin.from("assessments").insert(rows);
-          if (error) {
-            results.push(`  ❌ Failed to add assessments: ${error.message}`);
-          } else {
-            results.push(`  ✅ ${assessments.length} assessment(s) added to ${modData.name}.`);
+        const { error } = await supabaseAdmin.from("timetable_entries").insert({
+          user_id: userId, title: args.title, type: args.type,
+          day_of_week: args.day_of_week, start_time: args.start_time, end_time: args.end_time,
+          location: args.location || "", module_id: moduleId,
+        });
+        if (error) return `Error: ${error.message}`;
+        const dn = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+        return `✅ "${args.title}" added on ${dn[args.day_of_week]} ${args.start_time}–${args.end_time}.`;
+      }
+      case "update_timetable_entry": {
+        const dn = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+        let q = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.current_title}%`);
+        if (args.day_of_week !== undefined) q = q.eq("day_of_week", args.day_of_week);
+        const { data: entries } = await q;
+        if (!entries || entries.length === 0) return `❌ No entry matching "${args.current_title}".`;
+        const e = entries[0];
+        const updates: any = {};
+        if (args.new_title) updates.title = args.new_title;
+        if (args.new_type) updates.type = args.new_type;
+        if (args.new_day_of_week !== undefined) updates.day_of_week = args.new_day_of_week;
+        if (args.new_start_time) updates.start_time = args.new_start_time;
+        if (args.new_end_time) updates.end_time = args.new_end_time;
+        if (args.new_location !== undefined) updates.location = args.new_location;
+        if (args.module_name) {
+          const m = findModule(modules, args.module_name); if (m) updates.module_id = m.id;
+        }
+        if (!Object.keys(updates).length) return `⚠️ No changes specified.`;
+        const { error } = await supabaseAdmin.from("timetable_entries").update(updates).eq("id", e.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Updated "${e.title}"${updates.day_of_week !== undefined ? ` → ${dn[updates.day_of_week]}` : ''}.`;
+      }
+      case "delete_timetable_entry": {
+        let q = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.title}%`);
+        if (args.day_of_week !== undefined) q = q.eq("day_of_week", args.day_of_week);
+        const { data: entries } = await q;
+        if (!entries || entries.length === 0) return `❌ No entry matching "${args.title}".`;
+        const { error } = await supabaseAdmin.from("timetable_entries").delete().eq("id", entries[0].id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Deleted "${entries[0].title}".`;
+      }
+      case "log_study_session": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found.`;
+        const now = new Date();
+        const started = new Date(now.getTime() - args.duration_minutes * 60000);
+        const { error } = await supabaseAdmin.from("study_sessions").insert({
+          user_id: userId, module_id: mod.id, started_at: started.toISOString(),
+          ended_at: now.toISOString(), duration_minutes: args.duration_minutes,
+          topic: args.topic || "", energy_level: args.energy_level || 3, session_type: "custom",
+        });
+        if (error) return `Error: ${error.message}`;
+        return `✅ ${args.duration_minutes}min logged for ${mod.name}.`;
+      }
+      case "bulk_create_from_document": {
+        const results: string[] = [];
+        for (const md of args.modules || []) {
+          let mod = findModule(modules, md.name) || (md.code ? findModule(modules, md.code) : null);
+          if (!mod) {
+            const { data, error } = await supabaseAdmin.from("modules").insert({
+              user_id: userId, name: md.name, code: md.code || "",
+              credit_weight: md.credit_weight || 16,
+              color: MODULE_COLORS[modules.length % MODULE_COLORS.length],
+              semester: md.semester || "", sort_order: modules.length,
+            }).select().single();
+            if (error) { results.push(`❌ ${md.name}: ${error.message}`); continue; }
+            mod = data; modules.push(data);
+            results.push(`✅ Module "${md.name}" created.`);
+          } else results.push(`📝 "${md.name}" already exists.`);
+          const ass = md.assessments || [];
+          if (ass.length) {
+            const rows = ass.map((a: any) => ({
+              user_id: userId, module_id: mod.id, name: a.name,
+              type: a.type || "assignment", weight_percent: a.weight_percent || 0,
+              due_date: a.due_date || null, max_mark: a.max_mark || 100,
+              mark_achieved: a.mark_achieved ?? null, submitted: a.mark_achieved != null,
+            }));
+            const { error } = await supabaseAdmin.from("assessments").insert(rows);
+            results.push(error ? `  ❌ ${error.message}` : `  ✅ ${ass.length} assessment(s) added.`);
           }
         }
+        return results.join("\n");
       }
-      return results.join("\n");
-    }
-    case "create_calendar_events": {
-      // Get user's Google token and calendar preference
-      const { data: tokenRow } = await supabaseAdmin
-        .from("google_tokens")
-        .select("*")
-        .eq("user_id", userId)
-        .single();
-      
-      if (!tokenRow) return "⚠️ Google Calendar not connected. Events not created.";
-
-      // Get preferred calendar
-      const { data: profileData } = await supabaseAdmin
-        .from("users_profile")
-        .select("google_calendar_id")
-        .eq("user_id", userId)
-        .single();
-      
-      const calendarId = profileData?.google_calendar_id || "primary";
-
-      // Check token expiry and refresh if needed
-      let accessToken = tokenRow.access_token;
-      if (new Date(tokenRow.expires_at) < new Date()) {
-        const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID");
-        const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET");
-        if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
-          const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              client_id: GOOGLE_CLIENT_ID,
-              client_secret: GOOGLE_CLIENT_SECRET,
-              refresh_token: tokenRow.refresh_token,
-              grant_type: "refresh_token",
-            }),
-          });
-          const newTokens = await tokenRes.json();
-          if (tokenRes.ok) {
-            accessToken = newTokens.access_token;
-            await supabaseAdmin.from("google_tokens").update({
-              access_token: newTokens.access_token,
-              expires_at: new Date(Date.now() + newTokens.expires_in * 1000).toISOString(),
-            }).eq("user_id", userId);
-          } else {
-            return "⚠️ Google token expired and refresh failed. Please reconnect Google in Settings.";
-          }
-        }
-      }
-
-      const results: string[] = [];
-      for (const event of args.events || []) {
-        try {
-          const eventDate = new Date(event.date);
-          const calRes = await fetch(
-            `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                summary: event.title,
-                description: event.description || "",
-                start: { date: event.date },
-                end: { date: event.date },
-                reminders: {
-                  useDefault: false,
-                  overrides: [
-                    { method: "popup", minutes: 7 * 24 * 60 },
-                    { method: "popup", minutes: 3 * 24 * 60 },
-                    { method: "popup", minutes: 1 * 24 * 60 },
-                  ],
-                },
+      case "create_calendar_events": {
+        const { data: tokenRow } = await supabaseAdmin.from("google_tokens")
+          .select("*").eq("user_id", userId).maybeSingle();
+        if (!tokenRow) return "⚠️ Google Calendar not connected.";
+        const { data: profileData } = await supabaseAdmin.from("users_profile")
+          .select("google_calendar_id").eq("user_id", userId).maybeSingle();
+        const calendarId = profileData?.google_calendar_id || "primary";
+        let accessToken = tokenRow.access_token;
+        if (new Date(tokenRow.expires_at) < new Date()) {
+          const cid = Deno.env.get("GOOGLE_CLIENT_ID");
+          const csec = Deno.env.get("GOOGLE_CLIENT_SECRET");
+          if (cid && csec) {
+            const tr = await fetch("https://oauth2.googleapis.com/token", {
+              method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                client_id: cid, client_secret: csec,
+                refresh_token: tokenRow.refresh_token, grant_type: "refresh_token",
               }),
-            }
-          );
-          if (calRes.ok) {
-            results.push(`📅 "${event.title}" added to Google Calendar`);
-          } else {
-            results.push(`⚠️ Failed to add "${event.title}" to calendar`);
+            });
+            const nt = await tr.json();
+            if (tr.ok) {
+              accessToken = nt.access_token;
+              await supabaseAdmin.from("google_tokens").update({
+                access_token: nt.access_token,
+                expires_at: new Date(Date.now() + nt.expires_in * 1000).toISOString(),
+              }).eq("user_id", userId);
+            } else return "⚠️ Google token refresh failed. Reconnect in Settings.";
           }
-        } catch {
-          results.push(`⚠️ Failed to add "${event.title}" to calendar`);
         }
+        const results: string[] = [];
+        for (const ev of args.events || []) {
+          try {
+            const r = await fetch(
+              `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+              { method: "POST",
+                headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  summary: ev.title, description: ev.description || "",
+                  start: { date: ev.date }, end: { date: ev.date },
+                  reminders: { useDefault: false, overrides: [
+                    { method: "popup", minutes: 7*24*60 },
+                    { method: "popup", minutes: 3*24*60 },
+                    { method: "popup", minutes: 1*24*60 },
+                  ] },
+                }) });
+            results.push(r.ok ? `📅 "${ev.title}" added` : `⚠️ Failed "${ev.title}"`);
+          } catch { results.push(`⚠️ Failed "${ev.title}"`); }
+        }
+        return results.join("\n");
       }
-      return results.join("\n");
+      default: return `Unknown tool: ${toolName}`;
     }
-    default:
-      return `Unknown tool: ${toolName}`;
+  } catch (e: any) {
+    console.error(`Tool ${toolName} crashed:`, e);
+    return `❌ Tool ${toolName} failed: ${e?.message || String(e)}`;
   }
+}
+
+async function callAI(apiKey: string, body: any) {
+  return fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 serve(async (req) => {
@@ -548,175 +494,105 @@ serve(async (req) => {
       userId = user?.id || null;
     }
 
-    // Check if user has Google Calendar connected
     let hasGoogleCalendar = false;
-    if (userId) {
-      const { data: gToken } = await supabaseAdmin.from("google_tokens").select("id").eq("user_id", userId).single();
-      hasGoogleCalendar = !!gToken;
-    }
-
-    let systemPrompt = `You are StudyOS, an academic advisor and mentor built into a student's study management app. You are direct, honest, motivating without being sycophantic. You know this student's goals and hold them to it.
-
-CRITICAL RULE: When a student asks you to add, create, log, or record ANYTHING (modules, assessments, marks, goals, timetable entries, study sessions), you MUST use the appropriate tool function. NEVER just say you did it — actually call the tool. If you don't call a tool, the data won't be saved.
-
-Available actions via tools:
-- add_module: Create a new module/course
-- add_assessment: Add a test, assignment, exam to a module
-- log_mark: Record a grade for an assessment
-- add_goal: Create a goal
-- add_timetable_entry: Add to weekly timetable (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun)
-- update_timetable_entry: Update an existing timetable entry (change time, day, title, location)
-- delete_timetable_entry: Remove a timetable entry
-- log_study_session: Log study time
-- bulk_create_from_document: Bulk create modules + assessments from uploaded documents
-- create_calendar_events: Add events to Google Calendar${hasGoogleCalendar ? ' (CONNECTED - use this when creating assessments with dates)' : ' (NOT connected)'}
-
-When a student uploads a document (course outline, syllabus, transcript), use bulk_create_from_document to automatically create ALL modules and assessments with dates and weightings.
-
-When you perform an action, confirm what you did and offer next steps.`;
-
-    if (context) {
-      systemPrompt += `\n\nStudent Context:\n${context}`;
-    }
-
     let modules: any[] = [];
     if (userId) {
-      const { data } = await supabaseAdmin.from("modules").select("*").eq("user_id", userId);
-      modules = data || [];
+      const [g, m] = await Promise.all([
+        supabaseAdmin.from("google_tokens").select("id").eq("user_id", userId).maybeSingle(),
+        supabaseAdmin.from("modules").select("*").eq("user_id", userId).eq("archived", false),
+      ]);
+      hasGoogleCalendar = !!g.data;
+      modules = m.data || [];
     }
 
-    const aiMessages = [
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0,10);
+    const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][today.getDay()];
+
+    const systemPrompt = `You are StudyOS — a sharp, direct academic mentor inside a student's study app. Honest, motivating, never sycophantic. You hold the student to their goals.
+
+Today is ${dayName}, ${todayStr}.
+
+CRITICAL RULES
+- When the student asks you to add, update, log, record, delete, or schedule ANYTHING (modules, assessments, marks, goals, tasks, timetable, study sessions), CALL THE TOOL. Never claim you did it without calling a tool.
+- You may chain tools: e.g. add_module → add_assessment → create_calendar_events. After each tool result you'll get another turn to call more tools or respond.
+- Be concise. Lists and short paragraphs over walls of text.
+- Use the student's REAL data from the context below — don't invent assessments, marks, or modules.
+- For dates use ISO (YYYY-MM-DD). For day_of_week: 0=Mon..6=Sun.
+- Google Calendar is ${hasGoogleCalendar ? 'CONNECTED — use create_calendar_events for assessments with dates.' : 'NOT connected — do not call create_calendar_events.'}
+- When a document was just uploaded, prefer bulk_create_from_document over many add_* calls.${context ? `\n\n=== STUDENT CONTEXT ===\n${context}` : ''}`;
+
+    const aiMessages: any[] = [
       { role: "system", content: systemPrompt },
       ...messages,
     ];
 
-    // First call - may return tool calls
-    const firstResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: aiMessages,
+    const allToolResults: string[] = [];
+
+    // ── Multi-turn tool loop ─────────────────────────────────────────────────
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const resp = await callAI(LOVABLE_API_KEY, {
+        model: MODEL, messages: aiMessages,
         tools: userId ? TOOLS : undefined,
         tool_choice: userId ? "auto" : undefined,
         stream: false,
-      }),
-    });
-
-    if (!firstResponse.ok) {
-      const status = firstResponse.status;
-      const text = await firstResponse.text();
-      if (status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited. Please wait a moment and try again." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add funds." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      console.error("AI error:", status, text);
-      return new Response(JSON.stringify({ error: "AI gateway error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+
+      if (!resp.ok) {
+        const status = resp.status; const text = await resp.text();
+        console.error("AI error:", status, text);
+        if (status === 429) return new Response(JSON.stringify({ error: "Rate limited. Wait a moment." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "AI gateway error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const data = await resp.json();
+      const choice = data.choices?.[0];
+      const toolCalls = choice?.message?.tool_calls;
+      console.log(`Round ${round}: finish=${choice?.finish_reason} tools=${toolCalls?.length ?? 0}`);
+
+      if (!toolCalls?.length || !userId) {
+        // Final answer — re-stream it
+        aiMessages.push(choice.message);
+        break;
+      }
+
+      // Execute all tool calls in parallel
+      aiMessages.push(choice.message);
+      const results = await Promise.all(toolCalls.map((tc: any) => {
+        let args: any = {};
+        try { args = JSON.parse(tc.function.arguments); } catch {}
+        return executeTool(supabaseAdmin, userId!, tc.function.name, args, modules)
+          .then((r: string) => ({ tc, r }));
+      }));
+      for (const { tc, r } of results) {
+        allToolResults.push(r);
+        aiMessages.push({ role: "tool", tool_call_id: tc.id, content: r } as any);
+      }
     }
 
-    const firstData = await firstResponse.json();
-    const choice = firstData.choices?.[0];
-    console.log("AI finish_reason:", choice?.finish_reason, "has_tool_calls:", !!choice?.message?.tool_calls?.length);
-
-    // Check for tool calls
-    if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0 && userId) {
-      const toolResults: string[] = [];
-      const toolMessages = [...aiMessages, choice.message];
-
-      for (const toolCall of choice.message.tool_calls) {
-        const fnName = toolCall.function.name;
-        let fnArgs: any;
-        try {
-          fnArgs = JSON.parse(toolCall.function.arguments);
-        } catch {
-          fnArgs = {};
-        }
-        console.log("Executing tool:", fnName, "args:", JSON.stringify(fnArgs));
-        const result = await executeTool(supabaseAdmin, userId, fnName, fnArgs, modules);
-        console.log("Tool result:", result);
-        toolResults.push(result);
-        toolMessages.push({
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: result,
-        } as any);
-      }
-
-      // Second call to get final response after tool execution
-      const secondResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: toolMessages,
-          stream: true,
-        }),
-      });
-
-      if (!secondResponse.ok) {
-        const fallbackContent = toolResults.join("\n\n");
-        return new Response(
-          JSON.stringify({
-            choices: [{ message: { role: "assistant", content: fallbackContent } }],
-            tool_results: toolResults,
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Encode tool results as base64 to avoid ByteString issues with emojis
-      const encodedResults = btoa(unescape(encodeURIComponent(JSON.stringify(toolResults))));
-      return new Response(secondResponse.body, {
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "text/event-stream",
-          "X-Tool-Results": encodedResults,
-        },
-      });
-    }
-
-    // No tool calls - stream the response
-    const streamResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: aiMessages,
-        stream: true,
-      }),
+    // Stream the final response
+    const streamResp = await callAI(LOVABLE_API_KEY, {
+      model: MODEL, messages: aiMessages, stream: true,
     });
 
-    if (!streamResponse.ok) {
-      const text = await streamResponse.text();
-      console.error("Stream error:", text);
-      return new Response(JSON.stringify(firstData), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!streamResp.ok) {
+      const fallback = aiMessages[aiMessages.length - 1]?.content
+        || allToolResults.join("\n\n")
+        || "I couldn't generate a response.";
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: "assistant", content: fallback } }] }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    return new Response(streamResponse.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
-    });
+    const headers: Record<string, string> = {
+      ...corsHeaders, "Content-Type": "text/event-stream",
+    };
+    if (allToolResults.length) {
+      headers["X-Tool-Results"] = btoa(unescape(encodeURIComponent(JSON.stringify(allToolResults))));
+    }
+    return new Response(streamResp.body, { headers });
   } catch (e) {
     console.error("chat error:", e);
     return new Response(

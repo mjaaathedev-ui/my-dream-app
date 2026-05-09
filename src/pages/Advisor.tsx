@@ -5,53 +5,42 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Bot, Send, Upload, FileText, Loader2, Trash2 } from 'lucide-react';
+import { Bot, Send, Upload, FileText, Loader2, Trash2, Plus, MessageSquare, StopCircle, Wrench } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useDropzone } from 'react-dropzone';
 import { buildFullAppContext, buildModuleContext } from '@/lib/ai-context';
+import { formatDistanceToNow } from 'date-fns';
 import type { Module, UploadedFile, AIConversation } from '@/types/database';
 
 const SUGGESTED_PROMPTS = [
-  'Quiz me on this material',
-  'What are the most important topics for my exam?',
-  'Explain the key concepts simply',
   'What should I focus on today?',
-  'Am I on track for my target mark?',
-  'Add my timetable for this week',
-  'Create a study plan for my upcoming assessments',
+  'Am I on track for my target?',
+  'Quiz me on this material',
+  'Create a study plan for this week',
+  'What\'s due in the next 7 days?',
 ];
 
-type Message = { role: 'user' | 'assistant'; content: string };
+type Message = { role: 'user' | 'assistant'; content: string; toolResults?: string[] };
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
-// ── localStorage persistence helpers ────────────────────────────────────────
-const LS_MSGS   = 'studyos_advisor_messages';
-const LS_MOD    = 'studyos_advisor_module';
-const LS_CONV   = 'studyos_advisor_conv_id';
+// ── localStorage for the *active* conversation only ─────────────────────────
+const LS_MOD = 'studyos_advisor_module';
+const LS_CONV = 'studyos_advisor_conv_id';
 
-function ls_load(): { messages: Message[]; moduleId: string; conversationId: string | null } {
-  try {
-    return {
-      messages:       JSON.parse(localStorage.getItem(LS_MSGS) || '[]'),
-      moduleId:       localStorage.getItem(LS_MOD) || '',
-      conversationId: localStorage.getItem(LS_CONV) || null,
-    };
-  } catch {
-    return { messages: [], moduleId: '', conversationId: null };
-  }
+function deriveTitle(messages: Message[]): string {
+  const firstUser = messages.find(m => m.role === 'user');
+  if (!firstUser) return 'New conversation';
+  return firstUser.content.replace(/\s+/g, ' ').trim().slice(0, 60) || 'New conversation';
 }
-const ls_msgs  = (v: Message[])      => { try { localStorage.setItem(LS_MSGS, JSON.stringify(v)); } catch {} };
-const ls_mod   = (v: string)         => { try { localStorage.setItem(LS_MOD, v); } catch {} };
-const ls_conv  = (v: string | null)  => { try { v ? localStorage.setItem(LS_CONV, v) : localStorage.removeItem(LS_CONV); } catch {} };
-const ls_clear = ()                  => { localStorage.removeItem(LS_MSGS); localStorage.removeItem(LS_CONV); };
 
 async function streamChat({
-  messages, context, accessToken, onDelta, onDone, onToolResults,
+  messages, context, accessToken, signal, onDelta, onDone, onToolResults,
 }: {
   messages: Message[];
   context: string;
   accessToken: string;
+  signal: AbortSignal;
   onDelta: (text: string) => void;
   onDone: () => void;
   onToolResults?: (results: string[]) => void;
@@ -63,7 +52,11 @@ async function streamChat({
       Authorization: `Bearer ${accessToken}`,
       apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     },
-    body: JSON.stringify({ messages, context }),
+    body: JSON.stringify({
+      messages: messages.map(({ role, content }) => ({ role, content })),
+      context,
+    }),
+    signal,
   });
 
   if (!resp.ok) {
@@ -76,18 +69,15 @@ async function streamChat({
     try { onToolResults(JSON.parse(decodeURIComponent(escape(atob(toolHeader))))); } catch {}
   }
 
-  const contentType = resp.headers.get('content-type') || '';
-
-  if (contentType.includes('text/event-stream') && resp.body) {
-    const reader  = resp.body.getReader();
+  const ct = resp.headers.get('content-type') || '';
+  if (ct.includes('text/event-stream') && resp.body) {
+    const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
-
       let nl: number;
       while ((nl = buf.indexOf('\n')) !== -1) {
         let line = buf.slice(0, nl);
@@ -97,196 +87,233 @@ async function streamChat({
         const json = line.slice(6).trim();
         if (json === '[DONE]') break;
         try {
-          const parsed = JSON.parse(json);
-          const c = parsed.choices?.[0]?.delta?.content;
+          const c = JSON.parse(json).choices?.[0]?.delta?.content;
           if (c) onDelta(c);
         } catch { buf = line + '\n' + buf; break; }
       }
-    }
-    for (let raw of buf.split('\n')) {
-      if (!raw || !raw.startsWith('data: ')) continue;
-      const json = raw.slice(6).trim();
-      if (json === '[DONE]') continue;
-      try { const c = JSON.parse(json).choices?.[0]?.delta?.content; if (c) onDelta(c); } catch {}
     }
   } else {
     const data = await resp.json();
     const c = data.choices?.[0]?.message?.content || '';
     if (c) onDelta(c);
   }
-
   onDone();
 }
 
 export default function Advisor() {
   const { user, profile } = useAuth();
-  const [modules,  setModules]  = useState<Module[]>([]);
-  const [files,    setFiles]    = useState<UploadedFile[]>([]);
+  const [modules, setModules] = useState<Module[]>([]);
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [conversations, setConversations] = useState<AIConversation[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [loading,  setLoading]  = useState(false);
+  const [loading, setLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  // ── Hydrate from localStorage ─────────────────────────────────────────────
-  const boot = ls_load();
-  const [messages,        _setMessages]  = useState<Message[]>(boot.messages);
-  const [selectedModuleId, _setModuleId] = useState<string>(boot.moduleId);
-  const [conversationId,  _setConvId]    = useState<string | null>(boot.conversationId);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [selectedModuleId, _setModuleId] = useState<string>(() => localStorage.getItem(LS_MOD) || '');
+  const [conversationId, _setConvId] = useState<string | null>(() => localStorage.getItem(LS_CONV));
   const [input, setInput] = useState('');
 
-  const setMessages = useCallback((upd: Message[] | ((p: Message[]) => Message[])) => {
-    _setMessages(prev => {
-      const next = typeof upd === 'function' ? upd(prev) : upd;
-      ls_msgs(next);
-      return next;
-    });
+  const setSelectedModuleId = useCallback((id: string) => {
+    _setModuleId(id);
+    try { localStorage.setItem(LS_MOD, id); } catch {}
   }, []);
-  const setSelectedModuleId = useCallback((id: string) => { _setModuleId(id); ls_mod(id); }, []);
-  const setConversationId   = useCallback((id: string | null) => { _setConvId(id); ls_conv(id); }, []);
+  const setConversationId = useCallback((id: string | null) => {
+    _setConvId(id);
+    try { id ? localStorage.setItem(LS_CONV, id) : localStorage.removeItem(LS_CONV); } catch {}
+  }, []);
+
+  // ── Load modules + conversations ────────────────────────────────────────
+  const loadConversations = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase.from('ai_conversations').select('*')
+      .eq('user_id', user.id).order('updated_at', { ascending: false }).limit(50);
+    setConversations((data || []) as AIConversation[]);
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
     supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false)
-      .then(({ data }) => { if (data) setModules(data as Module[]); });
-  }, [user]);
+      .then(({ data }) => setModules((data || []) as Module[]));
+    loadConversations();
+  }, [user, loadConversations]);
 
+  // ── Load active conversation messages from DB on mount / switch ─────────
+  useEffect(() => {
+    if (!user || !conversationId) return;
+    supabase.from('ai_conversations').select('messages').eq('id', conversationId).maybeSingle()
+      .then(({ data }) => {
+        if (data?.messages) setMessages(data.messages as any);
+        else setMessages([]);
+      });
+  }, [user, conversationId]);
+
+  // ── Files for focused module ────────────────────────────────────────────
   useEffect(() => {
     if (!user || !selectedModuleId) { setFiles([]); return; }
     supabase.from('uploaded_files').select('*').eq('user_id', user.id).eq('module_id', selectedModuleId)
       .then(({ data }) => setFiles((data || []) as UploadedFile[]));
   }, [user, selectedModuleId]);
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const selectedModule = modules.find(m => m.id === selectedModuleId);
 
-  // ── File upload ─────────────────────────────────────────────────────────────
+  // ── New / switch / delete conversation ──────────────────────────────────
+  const startNewConversation = () => {
+    abortRef.current?.abort();
+    setMessages([]);
+    setConversationId(null);
+  };
+  const switchConversation = (id: string) => {
+    if (id === conversationId) return;
+    abortRef.current?.abort();
+    setConversationId(id);
+  };
+  const deleteConversation = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await supabase.from('ai_conversations').delete().eq('id', id);
+    setConversations(prev => prev.filter(c => c.id !== id));
+    if (id === conversationId) startNewConversation();
+  };
+
+  // ── File upload (unchanged behavior) ────────────────────────────────────
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (!user) return;
     setUploading(true);
-
     for (const file of acceptedFiles) {
-      const folder   = selectedModuleId || 'general';
+      const folder = selectedModuleId || 'general';
       const filePath = `${user.id}/${folder}/${Date.now()}_${file.name}`;
-
       const { error: uploadErr } = await supabase.storage.from('study-files').upload(filePath, file);
       if (uploadErr) { toast.error(`Failed to upload ${file.name}: ${uploadErr.message}`); continue; }
-
       const { data: fileRecord, error: dbErr } = await supabase.from('uploaded_files').insert({
         user_id: user.id, module_id: selectedModuleId || null,
         file_name: file.name, file_path: filePath, file_type: file.type, size_bytes: file.size,
       }).select().single();
-
       if (dbErr) { toast.error(`Failed to save record: ${dbErr.message}`); continue; }
       if (selectedModuleId) setFiles(prev => [...prev, fileRecord as UploadedFile]);
       toast.success(`${file.name} uploaded — analyzing...`);
-
       try {
-        const { data: extractData, error: extractErr } = await supabase.functions.invoke('extract-text', {
+        const { data: ed, error: ee } = await supabase.functions.invoke('extract-text', {
           body: { file_path: filePath, file_name: file.name, file_type: file.type, module_name: selectedModule?.name },
         });
-
-        if (!extractErr && extractData) {
-          if (extractData.extracted_text) {
-            await supabase.from('uploaded_files').update({ extracted_text: extractData.extracted_text }).eq('id', (fileRecord as UploadedFile).id);
+        if (!ee && ed) {
+          if (ed.extracted_text) {
+            await supabase.from('uploaded_files').update({ extracted_text: ed.extracted_text }).eq('id', (fileRecord as UploadedFile).id);
           }
-
-          const analysis = extractData.analysis;
-          const docType  = analysis?.document_type || 'other';
-          let aiPrompt   = `I just uploaded "${file.name}"`;
-
+          const docType = ed.analysis?.document_type || 'other';
+          let prompt = `I just uploaded "${file.name}"`;
           if (docType === 'course_outline' || docType === 'study_guide') {
-            aiPrompt += ` which is a ${docType.replace('_', ' ')}. Please automatically create ALL modules and assessments from this document including dates and weights. Also add them to Google Calendar if connected.`;
-            aiPrompt += `\n\nDocument content:\n${extractData.extracted_text?.substring(0, 40000) || ''}`;
+            prompt += ` (${docType.replace('_', ' ')}). Use bulk_create_from_document to create ALL modules and assessments with dates and weights. If Google Calendar is connected also create_calendar_events.\n\nDocument:\n${ed.extracted_text?.substring(0, 40000) || ''}`;
           } else if (docType === 'transcript') {
-            aiPrompt += ` which is my academic transcript. Please extract all modules and marks and create/update them in my system.`;
-            aiPrompt += `\n\nTranscript content:\n${extractData.extracted_text?.substring(0, 40000) || ''}`;
+            prompt += ` — my academic transcript. Extract all modules and marks and use the appropriate tools to record them.\n\nTranscript:\n${ed.extracted_text?.substring(0, 40000) || ''}`;
           } else {
+            const a = ed.analysis;
             let msg = `📄 **Analyzed: ${file.name}** (${docType.replace('_', ' ')})\n\n`;
-            if (analysis?.key_concepts?.length)  msg += `**Key Concepts:**\n${analysis.key_concepts.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}\n\n`;
-            if (analysis?.study_approach)         msg += `**Study Approach:** ${analysis.study_approach}\n\n`;
-            if (analysis?.quiz_questions?.length) msg += `**Quiz Questions:**\n${analysis.quiz_questions.map((q: any, i: number) => `${i + 1}. ${q.question}\n   *Answer: ${q.answer}*`).join('\n\n')}`;
+            if (a?.key_concepts?.length) msg += `**Key Concepts:**\n${a.key_concepts.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}\n\n`;
+            if (a?.study_approach) msg += `**Study Approach:** ${a.study_approach}\n\n`;
+            if (a?.quiz_questions?.length) msg += `**Quiz:**\n${a.quiz_questions.map((q: any, i: number) => `${i + 1}. ${q.question}\n   *${q.answer}*`).join('\n\n')}`;
             setMessages(prev => [...prev, { role: 'assistant', content: msg }]);
-            aiPrompt = '';
+            prompt = '';
           }
-
-          if (aiPrompt) { setUploading(false); await sendMessage(aiPrompt, true); return; }
+          if (prompt) { setUploading(false); await sendMessage(prompt, true); return; }
         }
-      } catch (e) { console.error('Text extraction failed:', e); }
+      } catch (e) { console.error('Extraction failed:', e); }
     }
     setUploading(false);
-  }, [user, selectedModuleId, selectedModule, messages, profile, conversationId]);
+  }, [user, selectedModuleId, selectedModule]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'application/pdf': ['.pdf'], 'text/plain': ['.txt'], 'image/*': ['.png', '.jpg', '.jpeg', '.webp'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] },
+    accept: { 'application/pdf': ['.pdf'], 'text/plain': ['.txt'], 'image/*': ['.png','.jpg','.jpeg','.webp'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] },
     noClick: true, noKeyboard: true,
   });
 
-  // ── Send message ────────────────────────────────────────────────────────────
+  // ── Persist a conversation snapshot ─────────────────────────────────────
+  const persistConversation = async (msgs: Message[], id: string | null): Promise<string | null> => {
+    if (!user) return id;
+    const title = deriveTitle(msgs);
+    if (id) {
+      await supabase.from('ai_conversations').update({
+        messages: msgs as any, context_summary: title, module_id: selectedModuleId || null,
+      }).eq('id', id);
+      return id;
+    }
+    const { data } = await supabase.from('ai_conversations').insert({
+      user_id: user.id, module_id: selectedModuleId || null,
+      messages: msgs as any, context_summary: title,
+    }).select().single();
+    return (data as AIConversation)?.id || null;
+  };
+
+  // ── Send message ────────────────────────────────────────────────────────
   const sendMessage = async (text: string, force = false) => {
     if (!user || !text.trim() || (!force && loading)) return;
 
-    const userMsg: Message    = { role: 'user', content: text };
-    const newMessages         = [...messages, userMsg];
+    const userMsg: Message = { role: 'user', content: text };
+    const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput('');
     setLoading(true);
 
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const accessToken           = session?.access_token || '';
+      const accessToken = session?.access_token || '';
 
-      // Full app context — same source of truth for all AI features
       let context = await buildFullAppContext(user.id, profile);
-      if (selectedModuleId) {
-        context += '\n' + await buildModuleContext(user.id, selectedModuleId);
-      }
+      if (selectedModuleId) context += '\n' + await buildModuleContext(user.id, selectedModuleId);
 
-      let assistantSoFar = '';
+      let acc = '';
+      let toolResults: string[] = [];
 
       const upsert = (chunk: string) => {
-        assistantSoFar += chunk;
+        acc += chunk;
         setMessages(prev => {
           const last = prev[prev.length - 1];
-          if (last?.role === 'assistant') return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantSoFar } : m);
-          return [...prev, { role: 'assistant', content: assistantSoFar }];
+          if (last?.role === 'assistant') {
+            return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: acc } : m);
+          }
+          return [...prev, { role: 'assistant', content: acc }];
         });
       };
 
       await streamChat({
-        messages: newMessages, context, accessToken,
+        messages: newMessages, context, accessToken, signal: ctrl.signal,
         onDelta: upsert,
-        onDone: async () => {
-          setLoading(false);
-          const final = [...newMessages, { role: 'assistant' as const, content: assistantSoFar }];
-          if (conversationId) {
-            await supabase.from('ai_conversations').update({ messages: final as any }).eq('id', conversationId);
-          } else {
-            const { data: conv } = await supabase.from('ai_conversations').insert({
-              user_id: user.id, module_id: selectedModuleId || null, messages: final as any,
-            }).select().single();
-            if (conv) setConversationId((conv as AIConversation).id);
-          }
-        },
-        onToolResults: () => {
+        onToolResults: (r) => {
+          toolResults = r;
+          // Refresh modules so the UI catches up if AI added one
           supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false)
             .then(({ data }) => { if (data) setModules(data as Module[]); });
         },
+        onDone: async () => {
+          setLoading(false);
+          const final: Message[] = [
+            ...newMessages,
+            { role: 'assistant' as const, content: acc, toolResults: toolResults.length ? toolResults : undefined },
+          ];
+          // attach toolResults onto the persisted state too
+          setMessages(final);
+          const newId = await persistConversation(final, conversationId);
+          if (newId && newId !== conversationId) setConversationId(newId);
+          loadConversations();
+        },
       });
     } catch (err: any) {
-      toast.error(err.message || 'Failed to get AI response');
+      if (err.name !== 'AbortError') toast.error(err.message || 'Failed to get AI response');
       setLoading(false);
     }
   };
 
-  // ── Clear ───────────────────────────────────────────────────────────────────
-  const clearConversation = async () => {
-    setMessages([]);
-    setConversationId(null);
-    ls_clear();
-    if (conversationId) await supabase.from('ai_conversations').delete().eq('id', conversationId);
+  const stopStreaming = () => {
+    abortRef.current?.abort();
+    setLoading(false);
+    toast.info('Stopped');
   };
 
   return (
@@ -303,68 +330,97 @@ export default function Advisor() {
       )}
 
       {/* Sidebar */}
-      <div className="w-[280px] border-r border-border p-4 hidden lg:flex lg:flex-col gap-4 overflow-auto shrink-0">
-        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Context</h2>
-
-        <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
-          <SelectTrigger><SelectValue placeholder="All modules (general)" /></SelectTrigger>
-          <SelectContent>
-            {modules.map(m => (
-              <SelectItem key={m.id} value={m.id}>
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full" style={{ backgroundColor: m.color }} />
-                  {m.name}
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-medium text-muted-foreground">Upload Documents</h3>
-            <label className="cursor-pointer">
-              <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
-                onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
-              <div className="flex items-center gap-1 text-xs text-primary hover:underline">
-                <Upload className="h-3 w-3" /> Upload
-              </div>
-            </label>
-          </div>
-          <p className="text-[10px] text-muted-foreground">Drop course outlines, transcripts, or study guides.</p>
-          {uploading && (
-            <div className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
-              <Loader2 className="h-3 w-3 animate-spin" /> Analyzing document...
-            </div>
-          )}
-          {files.map(f => (
-            <div key={f.id} className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
-              <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
-              <span className="truncate">{f.file_name}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="p-3 bg-accent/50 rounded-md text-xs space-y-1">
-          <p className="font-medium text-muted-foreground">Always in context:</p>
-          <p>Goal: {profile?.career_goal || 'Not set'}</p>
-          <p>Target: {profile?.target_average}%</p>
-          <p>All modules, grades, study sessions, timetable & goals</p>
-          {selectedModuleId && <p className="text-primary">+ focused module files</p>}
-        </div>
-
-        <div className="flex-1" />
-
-        {messages.length > 0 && (
-          <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground gap-1.5" onClick={clearConversation}>
-            <Trash2 className="h-3 w-3" /> Clear conversation
+      <div className="w-[280px] border-r border-border hidden lg:flex lg:flex-col shrink-0">
+        {/* Conversations */}
+        <div className="p-4 border-b border-border">
+          <Button onClick={startNewConversation} variant="outline" size="sm" className="w-full gap-1.5 mb-3">
+            <Plus className="h-3.5 w-3.5" /> New conversation
           </Button>
-        )}
+          <div className="space-y-0.5 max-h-[40vh] overflow-auto -mx-1">
+            {conversations.length === 0 && (
+              <p className="text-xs text-muted-foreground px-1">No past conversations.</p>
+            )}
+            {conversations.map(c => (
+              <div
+                key={c.id}
+                onClick={() => switchConversation(c.id)}
+                className={`group flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
+                  c.id === conversationId ? 'bg-accent' : 'hover:bg-accent/50'
+                }`}
+              >
+                <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <div className="flex-1 min-w-0">
+                  <p className="truncate">{c.context_summary || 'Untitled'}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {formatDistanceToNow(new Date(c.updated_at), { addSuffix: true })}
+                  </p>
+                </div>
+                <button
+                  onClick={(e) => deleteConversation(c.id, e)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Context */}
+        <div className="p-4 flex-1 overflow-auto space-y-4">
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Context</h2>
+
+          <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
+            <SelectTrigger><SelectValue placeholder="All modules (general)" /></SelectTrigger>
+            <SelectContent>
+              {modules.map(m => (
+                <SelectItem key={m.id} value={m.id}>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: m.color }} />
+                    {m.name}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-medium text-muted-foreground">Upload</h3>
+              <label className="cursor-pointer">
+                <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
+                  onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
+                <div className="flex items-center gap-1 text-xs text-primary hover:underline">
+                  <Upload className="h-3 w-3" /> Upload
+                </div>
+              </label>
+            </div>
+            <p className="text-[10px] text-muted-foreground">Course outlines, transcripts, study guides.</p>
+            {uploading && (
+              <div className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
+                <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
+              </div>
+            )}
+            {files.map(f => (
+              <div key={f.id} className="flex items-center gap-2 p-2 bg-accent rounded-md text-xs">
+                <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+                <span className="truncate">{f.file_name}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-3 bg-accent/50 rounded-md text-xs space-y-1">
+            <p className="font-medium text-muted-foreground">Always in context:</p>
+            <p>Today, modules, grades, projected averages, study activity, tasks, goals, timetable.</p>
+            {selectedModuleId && <p className="text-primary">+ focused module files</p>}
+          </div>
+        </div>
       </div>
 
       {/* Chat */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="lg:hidden p-3 border-b border-border flex gap-2">
+          <Button variant="outline" size="icon" onClick={startNewConversation}><Plus className="h-4 w-4" /></Button>
           <Select value={selectedModuleId} onValueChange={setSelectedModuleId}>
             <SelectTrigger className="flex-1"><SelectValue placeholder="All modules" /></SelectTrigger>
             <SelectContent>{modules.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
@@ -372,11 +428,8 @@ export default function Advisor() {
           <label className="cursor-pointer">
             <input type="file" className="hidden" multiple accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.docx"
               onChange={e => { if (e.target.files) onDrop(Array.from(e.target.files)); e.target.value = ''; }} />
-            <Button variant="outline" size="icon"><Upload className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" asChild><span><Upload className="h-4 w-4" /></span></Button>
           </label>
-          {messages.length > 0 && (
-            <Button variant="outline" size="icon" onClick={clearConversation}><Trash2 className="h-4 w-4" /></Button>
-          )}
         </div>
 
         <div className="flex-1 overflow-auto p-4 space-y-4">
@@ -386,13 +439,13 @@ export default function Advisor() {
                 <Bot className="h-6 w-6 text-primary" />
               </div>
               <h2 className="text-lg font-semibold mb-1">AI Advisor</h2>
-              <p className="text-sm text-muted-foreground mb-2 max-w-[400px]">
-                I have full context of your profile, modules, grades, study sessions, timetable, goals, and uploaded materials.
+              <p className="text-sm text-muted-foreground mb-2 max-w-[420px]">
+                Full context of your profile, modules, grades, projected averages, tasks, goals, timetable, and uploaded materials.
               </p>
-              <p className="text-xs text-muted-foreground mb-6 max-w-[400px]">
-                I can also <strong>add modules, assessments, goals, timetable entries, and log study sessions</strong> — just ask!
+              <p className="text-xs text-muted-foreground mb-6 max-w-[420px]">
+                I can <strong>add, update, or delete</strong> modules, assessments, marks, tasks, goals, and timetable entries — just ask.
               </p>
-              <div className="flex flex-wrap gap-2 justify-center max-w-[500px]">
+              <div className="flex flex-wrap gap-2 justify-center max-w-[520px]">
                 {SUGGESTED_PROMPTS.map(p => (
                   <button key={p} onClick={() => sendMessage(p)}
                     className="px-3 py-1.5 rounded-full border border-border text-xs hover:bg-accent transition-colors">
@@ -406,9 +459,23 @@ export default function Advisor() {
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[600px] rounded-xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-accent'}`}>
-                {msg.role === 'assistant'
-                  ? <div className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
-                  : msg.content}
+                {msg.role === 'assistant' ? (
+                  <div className="space-y-2">
+                    {msg.toolResults && msg.toolResults.length > 0 && (
+                      <div className="border-l-2 border-primary/40 pl-2 space-y-1">
+                        {msg.toolResults.map((r, idx) => (
+                          <div key={idx} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                            <Wrench className="h-3 w-3 mt-0.5 shrink-0" />
+                            <span className="whitespace-pre-wrap">{r}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  </div>
+                ) : msg.content}
               </div>
             </div>
           ))}
@@ -417,8 +484,8 @@ export default function Advisor() {
             <div className="flex justify-start">
               <div className="bg-accent rounded-xl px-4 py-3">
                 <div className="flex gap-1">
-                  {[0, 0.1, 0.2].map((delay, i) => (
-                    <div key={i} className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: `${delay}s` }} />
+                  {[0, 0.1, 0.2].map((d, i) => (
+                    <div key={i} className="h-2 w-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: `${d}s` }} />
                   ))}
                 </div>
               </div>
@@ -432,13 +499,20 @@ export default function Advisor() {
             <Input
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder={selectedModuleId ? 'Ask about your studies, or tell me what to add...' : 'Ask anything — I have full context of your entire app...'}
+              placeholder={selectedModuleId ? 'Ask about your studies, or tell me what to do...' : 'Ask anything — I have full context...'}
               disabled={loading}
               className="flex-1"
+              autoFocus
             />
-            <Button type="submit" size="icon" disabled={!input.trim() || loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
+            {loading ? (
+              <Button type="button" size="icon" variant="outline" onClick={stopStreaming}>
+                <StopCircle className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button type="submit" size="icon" disabled={!input.trim()}>
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
           </form>
         </div>
       </div>
