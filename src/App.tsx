@@ -19,6 +19,7 @@ const Exam = lazy(() => import("./pages/Exam"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Goals = lazy(() => import("./pages/Goals"));
 const Tasks = lazy(() => import("./pages/Tasks"));
+const Optimizer = lazy(() => import("./pages/Optimizer"));
 const Settings = lazy(() => import("./pages/Settings"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const GoogleAuthError = lazy(() => import("./pages/GoogleAuthError"));
@@ -109,6 +110,7 @@ const App = () => (
                 <Route path="/progress" element={<Progress />} />
                 <Route path="/goals" element={<Goals />} />
                 <Route path="/tasks" element={<Tasks />} />
+                <Route path="/optimizer" element={<Optimizer />} />
                 <Route path="/settings" element={<Settings />} />
               </Route>
               <Route path="*" element={<NotFound />} />

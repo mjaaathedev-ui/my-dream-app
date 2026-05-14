@@ -284,6 +284,7 @@ export type Database = {
           notes: string | null
           semester: string | null
           sort_order: number | null
+          target_mark: number | null
           user_id: string
           year: string | null
         }
@@ -298,6 +299,7 @@ export type Database = {
           notes?: string | null
           semester?: string | null
           sort_order?: number | null
+          target_mark?: number | null
           user_id: string
           year?: string | null
         }
@@ -312,6 +314,7 @@ export type Database = {
           notes?: string | null
           semester?: string | null
           sort_order?: number | null
+          target_mark?: number | null
           user_id?: string
           year?: string | null
         }

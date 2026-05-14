@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, BookOpen, Bot, Timer, Calendar,
-  FileEdit, TrendingUp, Target, Settings, LogOut, ChevronLeft, CheckSquare
+  FileEdit, TrendingUp, Target, Settings, LogOut, ChevronLeft, CheckSquare, Zap
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 const navItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Modules & Grades', url: '/grades', icon: BookOpen },
+  { title: 'Study Optimizer', url: '/optimizer', icon: Zap },
   { title: 'AI Advisor', url: '/advisor', icon: Bot },
   { title: 'Study Mode', url: '/study', icon: Timer },
   { title: 'Timetable', url: '/timetable', icon: Calendar },

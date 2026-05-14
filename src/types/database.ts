@@ -42,6 +42,8 @@ export interface Module {
   archived: boolean;
   notes: string;
   sort_order: number;
+  /** Optional per-module target final mark (0-100). Falls back to profile.target_average. */
+  target_mark?: number | null;
   created_at: string;
 }
 
