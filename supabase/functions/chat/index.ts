@@ -311,6 +311,32 @@ async function executeTool(
         if (error) return `Error: ${error.message}`;
         return `✅ Goal "${args.title}" created.`;
       }
+      case "update_goal": {
+        const { data: rows } = await supabaseAdmin.from("goals").select("*").eq("user_id", userId);
+        const g = (rows || []).find((r: any) =>
+          r.title.toLowerCase().includes(args.current_title.toLowerCase()) ||
+          args.current_title.toLowerCase().includes(r.title.toLowerCase()));
+        if (!g) return `❌ Goal "${args.current_title}" not found.`;
+        const updates: any = {};
+        if (args.new_title) updates.title = args.new_title;
+        if (args.new_description != null) updates.description = args.new_description;
+        if (args.target_value != null) updates.target_value = args.target_value;
+        if (args.current_value != null) updates.current_value = args.current_value;
+        if (args.deadline != null) updates.deadline = args.deadline;
+        if (!Object.keys(updates).length) return `⚠️ No changes specified.`;
+        const { error } = await supabaseAdmin.from("goals").update(updates).eq("id", g.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Updated goal "${g.title}".`;
+      }
+      case "delete_goal": {
+        const { data: rows } = await supabaseAdmin.from("goals").select("*").eq("user_id", userId);
+        const g = (rows || []).find((r: any) =>
+          r.title.toLowerCase().includes(args.title.toLowerCase()));
+        if (!g) return `❌ Goal "${args.title}" not found.`;
+        const { error } = await supabaseAdmin.from("goals").delete().eq("id", g.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Deleted goal "${g.title}".`;
+      }
       case "complete_goal": {
         const { data: rows } = await supabaseAdmin.from("goals").select("*").eq("user_id", userId);
         const g = (rows || []).find((r: any) =>
@@ -321,6 +347,39 @@ async function executeTool(
           .update({ achieved: true }).eq("id", g.id);
         if (error) return `Error: ${error.message}`;
         return `✅ Goal "${g.title}" marked achieved. 🎉`;
+      }
+      case "update_profile": {
+        const updates: any = {};
+        for (const k of ["full_name","institution","degree","year_of_study","career_goal","career_field","why_it_matters","target_average","daily_study_target_hours","funding_condition","has_funding_condition"]) {
+          if (args[k] !== undefined) updates[k] = args[k];
+        }
+        if (!Object.keys(updates).length) return `⚠️ No profile changes specified.`;
+        const { error } = await supabaseAdmin.from("users_profile").update(updates).eq("user_id", userId);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Profile updated: ${Object.keys(updates).join(", ")}.`;
+      }
+      case "add_journal_entry": {
+        let moduleId: string | null = null;
+        if (args.module_name) { const m = findModule(modules, args.module_name); if (m) moduleId = m.id; }
+        const { error } = await supabaseAdmin.from("journal_entries").insert({
+          user_id: userId, entry_type: args.entry_type, content: args.content, module_id: moduleId,
+        });
+        if (error) return `Error: ${error.message}`;
+        return `✅ ${args.entry_type.replace('_',' ')} saved.`;
+      }
+      case "mark_assessment_submitted": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found.`;
+        const { data: rows } = await supabaseAdmin.from("assessments").select("*")
+          .eq("user_id", userId).eq("module_id", mod.id);
+        const a = (rows || []).find((r: any) =>
+          r.name.toLowerCase().includes(args.assessment_name.toLowerCase()));
+        if (!a) return `❌ Assessment "${args.assessment_name}" not found.`;
+        const submitted = args.submitted ?? true;
+        const { error } = await supabaseAdmin.from("assessments")
+          .update({ submitted }).eq("id", a.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ "${a.name}" marked ${submitted ? 'submitted' : 'not submitted'}.`;
       }
       case "add_task": {
         const mod = findModule(modules, args.module_name);
