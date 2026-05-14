@@ -19,6 +19,7 @@ const Exam = lazy(() => import("./pages/Exam"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Goals = lazy(() => import("./pages/Goals"));
 const Tasks = lazy(() => import("./pages/Tasks"));
+const Optimizer = lazy(() => import("./pages/Optimizer"));
 const Settings = lazy(() => import("./pages/Settings"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const GoogleAuthError = lazy(() => import("./pages/GoogleAuthError"));
