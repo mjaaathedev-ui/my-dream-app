@@ -67,15 +67,54 @@ const TOOLS = [
 
   // ── GOALS ─────────────────────────────────────────────────────────────────
   { type: "function", function: { name: "add_goal",
-    description: "Create a goal",
+    description: "Create a goal. ONLY call after user confirms the proposed payload.",
     parameters: { type: "object", properties: {
       title: { type: "string" }, description: { type: "string" },
       type: { type: "string", enum: ["semester","module","career","funding"] },
       target_value: { type: "number" }, deadline: { type: "string", description: "YYYY-MM-DD" },
     }, required: ["title","type"] } } },
+  { type: "function", function: { name: "update_goal",
+    description: "Update an existing goal (title, description, target, deadline, current progress).",
+    parameters: { type: "object", properties: {
+      current_title: { type: "string" },
+      new_title: { type: "string" }, new_description: { type: "string" },
+      target_value: { type: "number" }, current_value: { type: "number" },
+      deadline: { type: "string", description: "YYYY-MM-DD" },
+    }, required: ["current_title"] } } },
+  { type: "function", function: { name: "delete_goal",
+    description: "Delete a goal by title.",
+    parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } } },
   { type: "function", function: { name: "complete_goal",
     description: "Mark a goal as achieved",
     parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } } },
+
+  // ── PROFILE ───────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "update_profile",
+    description: "Update the student's profile (target average, study target hours, career goal, etc.)",
+    parameters: { type: "object", properties: {
+      full_name: { type: "string" }, institution: { type: "string" },
+      degree: { type: "string" }, year_of_study: { type: "string" },
+      career_goal: { type: "string" }, career_field: { type: "string" },
+      why_it_matters: { type: "string" },
+      target_average: { type: "number" }, daily_study_target_hours: { type: "number" },
+      funding_condition: { type: "string" }, has_funding_condition: { type: "boolean" },
+    } } } },
+
+  // ── JOURNAL ───────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "add_journal_entry",
+    description: "Save a reflection / future-self / monthly-review journal entry",
+    parameters: { type: "object", properties: {
+      entry_type: { type: "string", enum: ["reflection","future_self","monthly_review"] },
+      content: { type: "string" }, module_name: { type: "string" },
+    }, required: ["entry_type","content"] } } },
+
+  // ── ASSESSMENT EXTRAS ─────────────────────────────────────────────────────
+  { type: "function", function: { name: "mark_assessment_submitted",
+    description: "Mark an assessment as submitted without recording a mark yet",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, assessment_name: { type: "string" },
+      submitted: { type: "boolean" },
+    }, required: ["module_name","assessment_name"] } } },
 
   // ── TASKS ─────────────────────────────────────────────────────────────────
   { type: "function", function: { name: "add_task",
