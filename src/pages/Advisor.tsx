@@ -442,8 +442,8 @@ export default function Advisor() {
               <p className="text-sm text-muted-foreground mb-2 max-w-[420px]">
                 Full context of your profile, modules, grades, projected averages, tasks, goals, timetable, and uploaded materials.
               </p>
-              <p className="text-xs text-muted-foreground mb-6 max-w-[420px]">
-                I can <strong>add, update, or delete</strong> modules, assessments, marks, tasks, goals, and timetable entries — just ask.
+              <p className="text-xs text-muted-foreground mb-6 max-w-[460px]">
+                I can <strong>add, update, or delete</strong> anything you can — modules, marks, goals, tasks, timetable, profile, journal. I'll always show you the exact change first and wait for your "yes" before writing.
               </p>
               <div className="flex flex-wrap gap-2 justify-center max-w-[520px]">
                 {SUGGESTED_PROMPTS.map(p => (
