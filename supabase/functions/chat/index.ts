@@ -67,15 +67,54 @@ const TOOLS = [
 
   // ── GOALS ─────────────────────────────────────────────────────────────────
   { type: "function", function: { name: "add_goal",
-    description: "Create a goal",
+    description: "Create a goal. ONLY call after user confirms the proposed payload.",
     parameters: { type: "object", properties: {
       title: { type: "string" }, description: { type: "string" },
       type: { type: "string", enum: ["semester","module","career","funding"] },
       target_value: { type: "number" }, deadline: { type: "string", description: "YYYY-MM-DD" },
     }, required: ["title","type"] } } },
+  { type: "function", function: { name: "update_goal",
+    description: "Update an existing goal (title, description, target, deadline, current progress).",
+    parameters: { type: "object", properties: {
+      current_title: { type: "string" },
+      new_title: { type: "string" }, new_description: { type: "string" },
+      target_value: { type: "number" }, current_value: { type: "number" },
+      deadline: { type: "string", description: "YYYY-MM-DD" },
+    }, required: ["current_title"] } } },
+  { type: "function", function: { name: "delete_goal",
+    description: "Delete a goal by title.",
+    parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } } },
   { type: "function", function: { name: "complete_goal",
     description: "Mark a goal as achieved",
     parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } } },
+
+  // ── PROFILE ───────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "update_profile",
+    description: "Update the student's profile (target average, study target hours, career goal, etc.)",
+    parameters: { type: "object", properties: {
+      full_name: { type: "string" }, institution: { type: "string" },
+      degree: { type: "string" }, year_of_study: { type: "string" },
+      career_goal: { type: "string" }, career_field: { type: "string" },
+      why_it_matters: { type: "string" },
+      target_average: { type: "number" }, daily_study_target_hours: { type: "number" },
+      funding_condition: { type: "string" }, has_funding_condition: { type: "boolean" },
+    } } } },
+
+  // ── JOURNAL ───────────────────────────────────────────────────────────────
+  { type: "function", function: { name: "add_journal_entry",
+    description: "Save a reflection / future-self / monthly-review journal entry",
+    parameters: { type: "object", properties: {
+      entry_type: { type: "string", enum: ["reflection","future_self","monthly_review"] },
+      content: { type: "string" }, module_name: { type: "string" },
+    }, required: ["entry_type","content"] } } },
+
+  // ── ASSESSMENT EXTRAS ─────────────────────────────────────────────────────
+  { type: "function", function: { name: "mark_assessment_submitted",
+    description: "Mark an assessment as submitted without recording a mark yet",
+    parameters: { type: "object", properties: {
+      module_name: { type: "string" }, assessment_name: { type: "string" },
+      submitted: { type: "boolean" },
+    }, required: ["module_name","assessment_name"] } } },
 
   // ── TASKS ─────────────────────────────────────────────────────────────────
   { type: "function", function: { name: "add_task",
@@ -272,6 +311,32 @@ async function executeTool(
         if (error) return `Error: ${error.message}`;
         return `✅ Goal "${args.title}" created.`;
       }
+      case "update_goal": {
+        const { data: rows } = await supabaseAdmin.from("goals").select("*").eq("user_id", userId);
+        const g = (rows || []).find((r: any) =>
+          r.title.toLowerCase().includes(args.current_title.toLowerCase()) ||
+          args.current_title.toLowerCase().includes(r.title.toLowerCase()));
+        if (!g) return `❌ Goal "${args.current_title}" not found.`;
+        const updates: any = {};
+        if (args.new_title) updates.title = args.new_title;
+        if (args.new_description != null) updates.description = args.new_description;
+        if (args.target_value != null) updates.target_value = args.target_value;
+        if (args.current_value != null) updates.current_value = args.current_value;
+        if (args.deadline != null) updates.deadline = args.deadline;
+        if (!Object.keys(updates).length) return `⚠️ No changes specified.`;
+        const { error } = await supabaseAdmin.from("goals").update(updates).eq("id", g.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Updated goal "${g.title}".`;
+      }
+      case "delete_goal": {
+        const { data: rows } = await supabaseAdmin.from("goals").select("*").eq("user_id", userId);
+        const g = (rows || []).find((r: any) =>
+          r.title.toLowerCase().includes(args.title.toLowerCase()));
+        if (!g) return `❌ Goal "${args.title}" not found.`;
+        const { error } = await supabaseAdmin.from("goals").delete().eq("id", g.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Deleted goal "${g.title}".`;
+      }
       case "complete_goal": {
         const { data: rows } = await supabaseAdmin.from("goals").select("*").eq("user_id", userId);
         const g = (rows || []).find((r: any) =>
@@ -282,6 +347,39 @@ async function executeTool(
           .update({ achieved: true }).eq("id", g.id);
         if (error) return `Error: ${error.message}`;
         return `✅ Goal "${g.title}" marked achieved. 🎉`;
+      }
+      case "update_profile": {
+        const updates: any = {};
+        for (const k of ["full_name","institution","degree","year_of_study","career_goal","career_field","why_it_matters","target_average","daily_study_target_hours","funding_condition","has_funding_condition"]) {
+          if (args[k] !== undefined) updates[k] = args[k];
+        }
+        if (!Object.keys(updates).length) return `⚠️ No profile changes specified.`;
+        const { error } = await supabaseAdmin.from("users_profile").update(updates).eq("user_id", userId);
+        if (error) return `Error: ${error.message}`;
+        return `✅ Profile updated: ${Object.keys(updates).join(", ")}.`;
+      }
+      case "add_journal_entry": {
+        let moduleId: string | null = null;
+        if (args.module_name) { const m = findModule(modules, args.module_name); if (m) moduleId = m.id; }
+        const { error } = await supabaseAdmin.from("journal_entries").insert({
+          user_id: userId, entry_type: args.entry_type, content: args.content, module_id: moduleId,
+        });
+        if (error) return `Error: ${error.message}`;
+        return `✅ ${args.entry_type.replace('_',' ')} saved.`;
+      }
+      case "mark_assessment_submitted": {
+        const mod = findModule(modules, args.module_name);
+        if (!mod) return `❌ Module "${args.module_name}" not found.`;
+        const { data: rows } = await supabaseAdmin.from("assessments").select("*")
+          .eq("user_id", userId).eq("module_id", mod.id);
+        const a = (rows || []).find((r: any) =>
+          r.name.toLowerCase().includes(args.assessment_name.toLowerCase()));
+        if (!a) return `❌ Assessment "${args.assessment_name}" not found.`;
+        const submitted = args.submitted ?? true;
+        const { error } = await supabaseAdmin.from("assessments")
+          .update({ submitted }).eq("id", a.id);
+        if (error) return `Error: ${error.message}`;
+        return `✅ "${a.name}" marked ${submitted ? 'submitted' : 'not submitted'}.`;
       }
       case "add_task": {
         const mod = findModule(modules, args.module_name);
@@ -509,18 +607,47 @@ serve(async (req) => {
     const todayStr = today.toISOString().slice(0,10);
     const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][today.getDay()];
 
-    const systemPrompt = `You are StudyOS — a sharp, direct academic mentor inside a student's study app. Honest, motivating, never sycophantic. You hold the student to their goals.
+    const systemPrompt = `You are StudyOS — a sharp, direct academic mentor inside a student's study app. Honest, motivating, never sycophantic.
 
 Today is ${dayName}, ${todayStr}.
 
-CRITICAL RULES
-- When the student asks you to add, update, log, record, delete, or schedule ANYTHING (modules, assessments, marks, goals, tasks, timetable, study sessions), CALL THE TOOL. Never claim you did it without calling a tool.
-- You may chain tools: e.g. add_module → add_assessment → create_calendar_events. After each tool result you'll get another turn to call more tools or respond.
-- Be concise. Lists and short paragraphs over walls of text.
-- Use the student's REAL data from the context below — don't invent assessments, marks, or modules.
-- For dates use ISO (YYYY-MM-DD). For day_of_week: 0=Mon..6=Sun.
-- Google Calendar is ${hasGoogleCalendar ? 'CONNECTED — use create_calendar_events for assessments with dates.' : 'NOT connected — do not call create_calendar_events.'}
-- When a document was just uploaded, prefer bulk_create_from_document over many add_* calls.${context ? `\n\n=== STUDENT CONTEXT ===\n${context}` : ''}`;
+═══ CONFIRM-BEFORE-WRITE PROTOCOL (MANDATORY) ═══
+For ANY write/mutation request (add, update, delete, log, record, schedule, mark complete, change profile) you MUST follow this two-step flow:
+
+STEP 1 — PROPOSE (no tool call):
+  • Reply in plain text with the EXACT payload you intend to write, formatted as a clear preview, e.g.:
+
+    "I'll add this — confirm?
+     • Tool: add_assessment
+     • Module: Calculus I
+     • Name: Test 2
+     • Type: test
+     • Weight: 20%
+     • Due: 2026-06-12
+     • Max mark: 100
+
+     Reply 'yes' to proceed, or tell me what to change."
+
+  • For multi-item batches (e.g. a whole timetable, bulk imports), list every item.
+  • Do NOT call any mutation tool in this step.
+
+STEP 2 — EXECUTE (tool call):
+  • Only after the user's NEXT message explicitly approves ("yes", "go", "do it", "confirm", "proceed", "ok", "👍", etc.) — call the tool(s) you proposed.
+  • If the user refines instead ("change due to next Friday", "make it 25%"), restate the updated proposal as a NEW preview and wait again.
+  • Never assume approval from silence or vague replies.
+  • If the user's first message is itself an explicit approval like "Add module X with code Y, weight 16, just do it" or "yes go ahead and create them", you may skip STEP 1 — but only when the user clearly bypassed confirmation.
+
+READ-ONLY operations (answering questions, computing averages, summarizing, suggesting plans, quizzing) — answer normally, NO confirmation needed.
+
+═══ TOOL CHAINING ═══
+After approval you may chain multiple tool calls in one turn (add_module → add_assessment → create_calendar_events). All tool calls in a single approved batch run together.
+
+═══ DATA RULES ═══
+- Use the student's REAL data from the context below — never invent modules, assessments, marks, or due dates.
+- For dates use ISO YYYY-MM-DD. For day_of_week: 0=Mon..6=Sun.
+- Google Calendar is ${hasGoogleCalendar ? 'CONNECTED — propose create_calendar_events for assessments with dates.' : 'NOT connected — do not propose create_calendar_events.'}
+- When a document was just uploaded, your STEP 1 proposal should outline ALL extracted modules+assessments, then on approval use bulk_create_from_document.
+- Be concise. Lists over walls of text.${context ? `\n\n=== STUDENT CONTEXT ===\n${context}` : ''}`;
 
     const aiMessages: any[] = [
       { role: "system", content: systemPrompt },
