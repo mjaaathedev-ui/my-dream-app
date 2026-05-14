@@ -110,6 +110,7 @@ const App = () => (
                 <Route path="/progress" element={<Progress />} />
                 <Route path="/goals" element={<Goals />} />
                 <Route path="/tasks" element={<Tasks />} />
+                <Route path="/optimizer" element={<Optimizer />} />
                 <Route path="/settings" element={<Settings />} />
               </Route>
               <Route path="*" element={<NotFound />} />
