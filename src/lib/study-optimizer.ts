@@ -31,8 +31,20 @@ export interface DailyScheduleBlock {
   color: string;
   startMinute: number;        // minutes from start of study day
   durationMinutes: number;
-  kind: 'deep' | 'review' | 'maintenance' | 'break';
+  kind: 'deep' | 'review' | 'maintenance' | 'break' | 'theory' | 'problems' | 'past_paper' | 'recall';
   rationale: string;
+}
+
+export interface DailyRecommendation {
+  /** Recommended total study hours today, given workload + days-to-exam horizon. */
+  recommendedHours: number;
+  /** Min/max sensible band (so the slider has guidance). */
+  minHours: number;
+  maxHours: number;
+  /** Modules the student should actually touch today (top by priority, capped). */
+  focusModules: ModuleOptimizerStats[];
+  /** Plain-language reasoning shown in the UI. */
+  reasoning: string[];
 }
 
 const DAY_MS = 86_400_000;
@@ -121,23 +133,27 @@ export function computeModuleStats(
   else if (requiredExamMark <= 75) status = 'stretch';
   else status = 'critical';
 
+  // ── Workload factor ──────────────────────────────────────────────────
+  const chaptersTotal = (module as any).chapters_total ?? null;
+  const chaptersDone = (module as any).chapters_done ?? 0;
+  const chaptersRemaining = chaptersTotal != null ? Math.max(0, chaptersTotal - chaptersDone) : null;
+  const selfDifficulty = (module as any).difficulty_rating ?? null; // 1..5
+  const selfDiffFactor = selfDifficulty ? 0.7 + (selfDifficulty - 1) * 0.15 : 1; // 0.7..1.3
+
   // ── Priority ──────────────────────────────────────────────────────────
-  // urgency: exponential ramp inside the critical window.
-  // exp(-(days)/τ) → 1.0 at exam day, ~0.37 at 5d, ~0.14 at 10d, ~0.05 at 15d.
-  // boost ×1.5 inside 5-day critical window.
   let priority = 0;
   if (exam && daysToExam !== null) {
     const urgency = Math.exp(-daysToExam / URGENCY_TAU) * (daysToExam <= 5 ? 1.5 : 1);
-    const weightFactor = (module.credit_weight || 16) / 16; // normalize ~1
-    // difficulty ramp: 0.5 floor so easy modules still get *some* time
+    const weightFactor = (module.credit_weight || 16) / 16;
     const difficultyFactor = 0.5 + difficulty * 1.5;
-    priority = urgency * weightFactor * difficultyFactor * 100;
-    // unreachable modules get less priority — better to focus the salvageable ones
+    const workloadFactor = chaptersRemaining != null
+      ? 1 + Math.min(2, chaptersRemaining / Math.max(1, daysToExam) / 2)
+      : 1;
+    priority = urgency * weightFactor * difficultyFactor * workloadFactor * selfDiffFactor * 100;
     if (status === 'unreachable') priority *= 0.4;
     if (status === 'safe') priority *= 0.25;
-  } else if (mine.some(a => !a.submitted)) {
-    // No exam scheduled but pending work → low maintenance priority
-    priority = 5;
+  } else if (mine.some(a => !a.submitted) || (chaptersRemaining ?? 0) > 0) {
+    priority = 5 + (chaptersRemaining ?? 0) * 0.5;
   }
 
   return {
@@ -145,6 +161,112 @@ export function computeModuleStats(
     targetFinal, requiredExamMark, difficulty, status, priority,
     allocatedMinutes: 0,
   };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Daily recommendation: how many hours, which modules
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recommend total daily study hours and a focus shortlist of modules.
+ * Uses chapters_remaining (≈2h/chapter) + an exam-prep buffer scaled by
+ * required-mark difficulty and credit weight, divided across days-to-exam.
+ */
+export function buildDailyRecommendation(
+  stats: ModuleOptimizerStats[],
+  opts: { maxModules?: number; horizonDays?: number; profileTargetHours?: number } = {},
+): DailyRecommendation {
+  const maxModules = opts.maxModules ?? 3;
+  const horizon = opts.horizonDays ?? 21;
+  const reasoning: string[] = [];
+
+  let totalDailyHours = 0;
+  for (const s of stats) {
+    if (!s.exam || s.daysToExam === null) continue;
+    if (s.daysToExam > horizon) continue;
+
+    const chaptersRemaining = ((s.module as any).chapters_total ?? 0) - ((s.module as any).chapters_done ?? 0);
+    const syllabusHours = Math.max(0, chaptersRemaining) * 2; // 2h/chapter
+
+    const reqDiff = s.requiredExamMark != null ? Math.max(0, Math.min(1, s.requiredExamMark / 100)) : 0.5;
+    const creditFactor = (s.module.credit_weight || 16) / 16;
+    const prepBuffer = (4 + reqDiff * 12) * creditFactor; // 4–16h base prep
+
+    const totalHoursNeeded = syllabusHours + prepBuffer;
+    const days = Math.max(1, s.daysToExam);
+    const perDay = totalHoursNeeded / days;
+    totalDailyHours += perDay;
+
+    if (perDay >= 0.75) {
+      reasoning.push(
+        `${s.module.name}: ~${Math.round(totalHoursNeeded)}h needed over ${days}d → ${perDay.toFixed(1)}h/day` +
+        (chaptersRemaining > 0 ? ` (${chaptersRemaining} chapters left)` : ''),
+      );
+    }
+  }
+
+  let recommendedHours = Math.round(totalDailyHours * 2) / 2;
+  if (!isFinite(recommendedHours) || recommendedHours <= 0) {
+    recommendedHours = opts.profileTargetHours ?? 2;
+    reasoning.push('No urgent exams in the horizon — using your default daily target.');
+  }
+  recommendedHours = Math.max(1.5, Math.min(10, recommendedHours));
+
+  const minHours = Math.max(1, Math.round((recommendedHours - 1.5) * 2) / 2);
+  const maxHours = Math.min(12, recommendedHours + 2);
+
+  const focusModules = stats.filter(s => s.priority > 0).slice(0, maxModules);
+  if (focusModules.length) {
+    reasoning.unshift(
+      `Focus on ${focusModules.length} module(s) today: ${focusModules.map(s => s.module.name).join(', ')}.`,
+    );
+  }
+
+  return { recommendedHours, minHours, maxHours, focusModules, reasoning };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Session-kind selection (theory / problems / past paper / recall)
+// ──────────────────────────────────────────────────────────────────────────
+
+function sessionMixForDays(daysToExam: number | null): Array<{ kind: DailyScheduleBlock['kind']; share: number }> {
+  if (daysToExam === null || daysToExam > 21) {
+    return [{ kind: 'theory', share: 0.7 }, { kind: 'problems', share: 0.3 }];
+  }
+  if (daysToExam > 10) {
+    return [
+      { kind: 'theory', share: 0.45 },
+      { kind: 'problems', share: 0.4 },
+      { kind: 'past_paper', share: 0.15 },
+    ];
+  }
+  if (daysToExam > 4) {
+    return [
+      { kind: 'past_paper', share: 0.5 },
+      { kind: 'problems', share: 0.3 },
+      { kind: 'recall', share: 0.2 },
+    ];
+  }
+  return [
+    { kind: 'past_paper', share: 0.55 },
+    { kind: 'recall', share: 0.35 },
+    { kind: 'problems', share: 0.1 },
+  ];
+}
+
+const SESSION_LABELS: Record<DailyScheduleBlock['kind'], string> = {
+  deep: 'Deep work',
+  review: 'Review',
+  maintenance: 'Maintenance',
+  break: 'Break',
+  theory: 'Theory study',
+  problems: 'Problem set',
+  past_paper: 'Past paper',
+  recall: 'Active recall',
+};
+
+export function sessionLabel(kind: DailyScheduleBlock['kind']): string {
+  return SESSION_LABELS[kind];
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -157,99 +279,100 @@ const MAINT_BLOCK = 25;    // min
 const BREAK_BLOCK = 15;    // min between blocks
 
 /**
- * Allocate `totalHours` of study across modules using priority scores.
- * Returns ordered blocks suitable for a daily timeline.
+ * Allocate `totalHours` of study across the top `maxModules` modules using
+ * priority scores, then split each module's allocation into typed sub-blocks
+ * (theory / problems / past_paper / recall) that match its days-to-exam phase.
  */
 export function generateDailySchedule(
   stats: ModuleOptimizerStats[],
   totalHours: number,
   startTime = '08:00',
+  opts: { maxModules?: number } = {},
 ): { blocks: DailyScheduleBlock[]; allocations: ModuleOptimizerStats[] } {
+  const maxModules = opts.maxModules ?? 3;
   const totalMinutes = Math.max(0, Math.round(totalHours * 60));
-  const eligible = stats.filter(s => s.priority > 0).sort((a, b) => b.priority - a.priority);
-  if (!eligible.length || totalMinutes === 0) {
-    return { blocks: [], allocations: stats.map(s => ({ ...s, allocatedMinutes: 0 })) };
-  }
+  const eligible = stats
+    .filter(s => s.priority > 0)
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, maxModules); // ← cap modules per day
 
-  // Proportional allocation, then quantize to block sizes
-  const totalPriority = eligible.reduce((s, x) => s + x.priority, 0);
-  const raw = eligible.map(s => ({
-    s,
-    desired: (s.priority / totalPriority) * totalMinutes,
-  }));
-
-  // Pick a block size per module by rank
   const allocations: ModuleOptimizerStats[] = stats.map(x => ({ ...x, allocatedMinutes: 0 }));
-  const findAlloc = (id: string) => allocations.find(a => a.module.id === id)!;
-
-  // Greedy fill: top module gets DEEP_BLOCK first, then iterate
-  let remaining = totalMinutes;
-  const queue = raw.map(r => ({
-    id: r.s.module.id, desired: r.desired, given: 0, rank: 0,
-  }));
-  queue.forEach((q, i) => (q.rank = i));
-
-  // Initial seed: each module that "deserves" any time gets at least one block.
-  for (const q of queue) {
-    if (remaining <= 0) break;
-    const minBlock = q.rank === 0 ? DEEP_BLOCK : q.rank === 1 ? REVIEW_BLOCK : MAINT_BLOCK;
-    if (q.desired < minBlock * 0.4) continue; // too little priority — skip
-    const give = Math.min(minBlock, remaining);
-    q.given += give;
-    remaining -= give;
+  if (!eligible.length || totalMinutes === 0) {
+    return { blocks: [], allocations };
   }
 
-  // Distribute leftover greedily by largest (desired - given)
-  while (remaining >= MAINT_BLOCK) {
-    queue.sort((a, b) => (b.desired - b.given) - (a.desired - a.given));
-    const top = queue[0];
-    if (top.desired - top.given <= MAINT_BLOCK * 0.3) break;
-    const block = top.rank === 0 ? DEEP_BLOCK : top.rank === 1 ? REVIEW_BLOCK : MAINT_BLOCK;
-    const give = Math.min(block, remaining);
-    top.given += give;
-    remaining -= give;
-  }
+  // Proportional allocation, snapped to 15-min increments, min 30m per module
+  const totalPriority = eligible.reduce((s, x) => s + x.priority, 0);
+  const minPerModule = Math.min(45, Math.floor(totalMinutes / eligible.length));
+  const desired = eligible.map(s => Math.max(minPerModule, Math.round(((s.priority / totalPriority) * totalMinutes) / 15) * 15));
 
-  for (const q of queue) findAlloc(q.id).allocatedMinutes = q.given;
+  // Rescale if over budget
+  const sumDesired = desired.reduce((a, b) => a + b, 0);
+  const scale = sumDesired > totalMinutes ? totalMinutes / sumDesired : 1;
+  const given = desired.map(d => Math.max(MAINT_BLOCK, Math.round((d * scale) / 15) * 15));
 
-  // Build timeline
+  eligible.forEach((s, i) => {
+    const a = allocations.find(x => x.module.id === s.module.id)!;
+    a.allocatedMinutes = given[i];
+  });
+
+  // Build timeline — each module produces a sequence of typed sub-blocks
   const blocks: DailyScheduleBlock[] = [];
   const [hh, mm] = startTime.split(':').map(Number);
   let cursor = hh * 60 + mm;
 
-  // Order blocks: deep work first (highest priority), then alternate by remaining size
-  const ordered = [...queue].sort((a, b) => a.rank - b.rank).filter(q => q.given > 0);
+  eligible.forEach((stat, idx) => {
+    const total = given[idx];
+    const mix = sessionMixForDays(stat.daysToExam);
 
-  ordered.forEach((q, i) => {
-    const stat = findAlloc(q.id);
-    let kind: DailyScheduleBlock['kind'] =
-      q.rank === 0 ? 'deep' : q.rank === 1 ? 'review' : 'maintenance';
-
-    const rationale = stat.requiredExamMark !== null
-      ? `Need ${Math.round(stat.requiredExamMark)}% on exam (${stat.daysToExam}d away, ${stat.module.credit_weight}cr)`
-      : `Maintenance — no exam scheduled`;
-
-    blocks.push({
-      moduleId: stat.module.id,
-      moduleName: stat.module.name,
-      color: stat.module.color,
-      startMinute: cursor,
-      durationMinutes: q.given,
-      kind,
-      rationale,
+    // Convert shares into minute amounts, snap to 15m, ensure ≥25m per kind
+    const subs: { kind: DailyScheduleBlock['kind']; minutes: number }[] = [];
+    let assigned = 0;
+    mix.forEach((m, i) => {
+      const isLast = i === mix.length - 1;
+      let mins = isLast
+        ? total - assigned
+        : Math.max(MAINT_BLOCK, Math.round((m.share * total) / 15) * 15);
+      mins = Math.min(mins, total - assigned);
+      if (mins >= MAINT_BLOCK) {
+        subs.push({ kind: m.kind, minutes: mins });
+        assigned += mins;
+      }
     });
-    cursor += q.given;
+    if (subs.length === 0) subs.push({ kind: mix[0].kind, minutes: total });
 
-    // Insert a break after each block except the last
-    if (i < ordered.length - 1) {
+    subs.forEach((sub, sIdx) => {
+      const rationale = stat.requiredExamMark !== null
+        ? `Need ${Math.round(stat.requiredExamMark)}% on exam · ${stat.daysToExam}d away · ${stat.module.credit_weight}cr`
+        : 'Steady syllabus progress — no exam scheduled';
       blocks.push({
-        moduleId: '',
-        moduleName: 'Break',
-        color: '#94A3B8',
+        moduleId: stat.module.id,
+        moduleName: stat.module.name,
+        color: stat.module.color,
         startMinute: cursor,
-        durationMinutes: BREAK_BLOCK,
-        kind: 'break',
-        rationale: 'Reset focus',
+        durationMinutes: sub.minutes,
+        kind: sub.kind,
+        rationale,
+      });
+      cursor += sub.minutes;
+
+      // Short break between sub-blocks within the same module (except last)
+      if (sIdx < subs.length - 1) {
+        blocks.push({
+          moduleId: '', moduleName: 'Break', color: '#94A3B8',
+          startMinute: cursor, durationMinutes: 10, kind: 'break',
+          rationale: 'Quick reset',
+        });
+        cursor += 10;
+      }
+    });
+
+    // Longer break between modules
+    if (idx < eligible.length - 1) {
+      blocks.push({
+        moduleId: '', moduleName: 'Break', color: '#94A3B8',
+        startMinute: cursor, durationMinutes: BREAK_BLOCK, kind: 'break',
+        rationale: 'Switch modules — stretch + hydrate',
       });
       cursor += BREAK_BLOCK;
     }
