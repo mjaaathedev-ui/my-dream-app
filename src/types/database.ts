@@ -44,6 +44,12 @@ export interface Module {
   sort_order: number;
   /** Optional per-module target final mark (0-100). Falls back to profile.target_average. */
   target_mark?: number | null;
+  /** Total chapters/units in the module syllabus. */
+  chapters_total?: number | null;
+  /** Chapters already studied. */
+  chapters_done?: number | null;
+  /** Self-rated difficulty 1–5. */
+  difficulty_rating?: number | null;
   created_at: string;
 }
 
