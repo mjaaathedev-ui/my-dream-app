@@ -31,8 +31,20 @@ export interface DailyScheduleBlock {
   color: string;
   startMinute: number;        // minutes from start of study day
   durationMinutes: number;
-  kind: 'deep' | 'review' | 'maintenance' | 'break';
+  kind: 'deep' | 'review' | 'maintenance' | 'break' | 'theory' | 'problems' | 'past_paper' | 'recall';
   rationale: string;
+}
+
+export interface DailyRecommendation {
+  /** Recommended total study hours today, given workload + days-to-exam horizon. */
+  recommendedHours: number;
+  /** Min/max sensible band (so the slider has guidance). */
+  minHours: number;
+  maxHours: number;
+  /** Modules the student should actually touch today (top by priority, capped). */
+  focusModules: ModuleOptimizerStats[];
+  /** Plain-language reasoning shown in the UI. */
+  reasoning: string[];
 }
 
 const DAY_MS = 86_400_000;
