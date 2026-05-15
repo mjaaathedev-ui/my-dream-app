@@ -133,23 +133,27 @@ export function computeModuleStats(
   else if (requiredExamMark <= 75) status = 'stretch';
   else status = 'critical';
 
+  // ── Workload factor ──────────────────────────────────────────────────
+  const chaptersTotal = (module as any).chapters_total ?? null;
+  const chaptersDone = (module as any).chapters_done ?? 0;
+  const chaptersRemaining = chaptersTotal != null ? Math.max(0, chaptersTotal - chaptersDone) : null;
+  const selfDifficulty = (module as any).difficulty_rating ?? null; // 1..5
+  const selfDiffFactor = selfDifficulty ? 0.7 + (selfDifficulty - 1) * 0.15 : 1; // 0.7..1.3
+
   // ── Priority ──────────────────────────────────────────────────────────
-  // urgency: exponential ramp inside the critical window.
-  // exp(-(days)/τ) → 1.0 at exam day, ~0.37 at 5d, ~0.14 at 10d, ~0.05 at 15d.
-  // boost ×1.5 inside 5-day critical window.
   let priority = 0;
   if (exam && daysToExam !== null) {
     const urgency = Math.exp(-daysToExam / URGENCY_TAU) * (daysToExam <= 5 ? 1.5 : 1);
-    const weightFactor = (module.credit_weight || 16) / 16; // normalize ~1
-    // difficulty ramp: 0.5 floor so easy modules still get *some* time
+    const weightFactor = (module.credit_weight || 16) / 16;
     const difficultyFactor = 0.5 + difficulty * 1.5;
-    priority = urgency * weightFactor * difficultyFactor * 100;
-    // unreachable modules get less priority — better to focus the salvageable ones
+    const workloadFactor = chaptersRemaining != null
+      ? 1 + Math.min(2, chaptersRemaining / Math.max(1, daysToExam) / 2)
+      : 1;
+    priority = urgency * weightFactor * difficultyFactor * workloadFactor * selfDiffFactor * 100;
     if (status === 'unreachable') priority *= 0.4;
     if (status === 'safe') priority *= 0.25;
-  } else if (mine.some(a => !a.submitted)) {
-    // No exam scheduled but pending work → low maintenance priority
-    priority = 5;
+  } else if (mine.some(a => !a.submitted) || (chaptersRemaining ?? 0) > 0) {
+    priority = 5 + (chaptersRemaining ?? 0) * 0.5;
   }
 
   return {
@@ -157,6 +161,112 @@ export function computeModuleStats(
     targetFinal, requiredExamMark, difficulty, status, priority,
     allocatedMinutes: 0,
   };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Daily recommendation: how many hours, which modules
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recommend total daily study hours and a focus shortlist of modules.
+ * Uses chapters_remaining (≈2h/chapter) + an exam-prep buffer scaled by
+ * required-mark difficulty and credit weight, divided across days-to-exam.
+ */
+export function buildDailyRecommendation(
+  stats: ModuleOptimizerStats[],
+  opts: { maxModules?: number; horizonDays?: number; profileTargetHours?: number } = {},
+): DailyRecommendation {
+  const maxModules = opts.maxModules ?? 3;
+  const horizon = opts.horizonDays ?? 21;
+  const reasoning: string[] = [];
+
+  let totalDailyHours = 0;
+  for (const s of stats) {
+    if (!s.exam || s.daysToExam === null) continue;
+    if (s.daysToExam > horizon) continue;
+
+    const chaptersRemaining = ((s.module as any).chapters_total ?? 0) - ((s.module as any).chapters_done ?? 0);
+    const syllabusHours = Math.max(0, chaptersRemaining) * 2; // 2h/chapter
+
+    const reqDiff = s.requiredExamMark != null ? Math.max(0, Math.min(1, s.requiredExamMark / 100)) : 0.5;
+    const creditFactor = (s.module.credit_weight || 16) / 16;
+    const prepBuffer = (4 + reqDiff * 12) * creditFactor; // 4–16h base prep
+
+    const totalHoursNeeded = syllabusHours + prepBuffer;
+    const days = Math.max(1, s.daysToExam);
+    const perDay = totalHoursNeeded / days;
+    totalDailyHours += perDay;
+
+    if (perDay >= 0.75) {
+      reasoning.push(
+        `${s.module.name}: ~${Math.round(totalHoursNeeded)}h needed over ${days}d → ${perDay.toFixed(1)}h/day` +
+        (chaptersRemaining > 0 ? ` (${chaptersRemaining} chapters left)` : ''),
+      );
+    }
+  }
+
+  let recommendedHours = Math.round(totalDailyHours * 2) / 2;
+  if (!isFinite(recommendedHours) || recommendedHours <= 0) {
+    recommendedHours = opts.profileTargetHours ?? 2;
+    reasoning.push('No urgent exams in the horizon — using your default daily target.');
+  }
+  recommendedHours = Math.max(1.5, Math.min(10, recommendedHours));
+
+  const minHours = Math.max(1, Math.round((recommendedHours - 1.5) * 2) / 2);
+  const maxHours = Math.min(12, recommendedHours + 2);
+
+  const focusModules = stats.filter(s => s.priority > 0).slice(0, maxModules);
+  if (focusModules.length) {
+    reasoning.unshift(
+      `Focus on ${focusModules.length} module(s) today: ${focusModules.map(s => s.module.name).join(', ')}.`,
+    );
+  }
+
+  return { recommendedHours, minHours, maxHours, focusModules, reasoning };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Session-kind selection (theory / problems / past paper / recall)
+// ──────────────────────────────────────────────────────────────────────────
+
+function sessionMixForDays(daysToExam: number | null): Array<{ kind: DailyScheduleBlock['kind']; share: number }> {
+  if (daysToExam === null || daysToExam > 21) {
+    return [{ kind: 'theory', share: 0.7 }, { kind: 'problems', share: 0.3 }];
+  }
+  if (daysToExam > 10) {
+    return [
+      { kind: 'theory', share: 0.45 },
+      { kind: 'problems', share: 0.4 },
+      { kind: 'past_paper', share: 0.15 },
+    ];
+  }
+  if (daysToExam > 4) {
+    return [
+      { kind: 'past_paper', share: 0.5 },
+      { kind: 'problems', share: 0.3 },
+      { kind: 'recall', share: 0.2 },
+    ];
+  }
+  return [
+    { kind: 'past_paper', share: 0.55 },
+    { kind: 'recall', share: 0.35 },
+    { kind: 'problems', share: 0.1 },
+  ];
+}
+
+const SESSION_LABELS: Record<DailyScheduleBlock['kind'], string> = {
+  deep: 'Deep work',
+  review: 'Review',
+  maintenance: 'Maintenance',
+  break: 'Break',
+  theory: 'Theory study',
+  problems: 'Problem set',
+  past_paper: 'Past paper',
+  recall: 'Active recall',
+};
+
+export function sessionLabel(kind: DailyScheduleBlock['kind']): string {
+  return SESSION_LABELS[kind];
 }
 
 // ──────────────────────────────────────────────────────────────────────────
