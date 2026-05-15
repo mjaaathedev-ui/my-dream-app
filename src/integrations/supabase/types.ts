@@ -275,10 +275,13 @@ export type Database = {
       modules: {
         Row: {
           archived: boolean | null
+          chapters_done: number | null
+          chapters_total: number | null
           code: string
           color: string
           created_at: string
           credit_weight: number
+          difficulty_rating: number | null
           id: string
           name: string
           notes: string | null
@@ -290,10 +293,13 @@ export type Database = {
         }
         Insert: {
           archived?: boolean | null
+          chapters_done?: number | null
+          chapters_total?: number | null
           code?: string
           color?: string
           created_at?: string
           credit_weight?: number
+          difficulty_rating?: number | null
           id?: string
           name: string
           notes?: string | null
@@ -305,10 +311,13 @@ export type Database = {
         }
         Update: {
           archived?: boolean | null
+          chapters_done?: number | null
+          chapters_total?: number | null
           code?: string
           color?: string
           created_at?: string
           credit_weight?: number
+          difficulty_rating?: number | null
           id?: string
           name?: string
           notes?: string | null
