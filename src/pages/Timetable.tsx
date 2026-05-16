@@ -70,6 +70,7 @@ import {
   DAY_NAMES_SHORT,
   dateStringToDow,
   recurrenceLabel,
+  entryDisplayStatus,
 } from "../utils/Timetableutils";
 import { detectConflict } from "../utils/ConflictDetector";
 import {
