@@ -445,14 +445,30 @@ async function executeTool(
         if (args.module_name) {
           const m = findModule(modules, args.module_name); if (m) moduleId = m.id;
         }
+        const entryType = args.entry_type || (args.specific_date ? "once" : "recurring");
+        let dow = args.day_of_week;
+        if (entryType === "once" && args.specific_date) {
+          const d = new Date(args.specific_date + "T00:00:00");
+          dow = (d.getDay() + 6) % 7;
+        }
+        if (dow === undefined || dow === null) return `❌ Need day_of_week (recurring) or specific_date (once).`;
         const { error } = await supabaseAdmin.from("timetable_entries").insert({
           user_id: userId, title: args.title, type: args.type,
-          day_of_week: args.day_of_week, start_time: args.start_time, end_time: args.end_time,
-          location: args.location || "", module_id: moduleId,
+          entry_type: entryType,
+          specific_date: entryType === "once" ? args.specific_date : null,
+          recurrence: entryType === "recurring" ? (args.recurrence || "weekly") : "weekly",
+          day_of_week: dow, start_time: args.start_time, end_time: args.end_time,
+          location: args.location || "", notes: args.notes || null,
+          category: args.category || null,
+          priority: args.priority ?? (args.type === "assessment" ? 5 : 3),
+          status: "scheduled",
+          recurring: entryType === "recurring",
+          module_id: moduleId,
         });
         if (error) return `Error: ${error.message}`;
         const dn = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-        return `✅ "${args.title}" added on ${dn[args.day_of_week]} ${args.start_time}–${args.end_time}.`;
+        const when = entryType === "once" ? args.specific_date : dn[dow];
+        return `✅ "${args.title}" added on ${when} ${args.start_time}–${args.end_time}${args.priority ? ` (priority ${args.priority})` : ''}.`;
       }
       case "update_timetable_entry": {
         const dn = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
@@ -464,17 +480,33 @@ async function executeTool(
         const updates: any = {};
         if (args.new_title) updates.title = args.new_title;
         if (args.new_type) updates.type = args.new_type;
+        if (args.new_entry_type) {
+          updates.entry_type = args.new_entry_type;
+          updates.recurring = args.new_entry_type === "recurring";
+        }
+        if (args.new_specific_date !== undefined) {
+          updates.specific_date = args.new_specific_date;
+          if (args.new_specific_date) {
+            const d = new Date(args.new_specific_date + "T00:00:00");
+            updates.day_of_week = (d.getDay() + 6) % 7;
+          }
+        }
         if (args.new_day_of_week !== undefined) updates.day_of_week = args.new_day_of_week;
+        if (args.new_recurrence) updates.recurrence = args.new_recurrence;
         if (args.new_start_time) updates.start_time = args.new_start_time;
         if (args.new_end_time) updates.end_time = args.new_end_time;
         if (args.new_location !== undefined) updates.location = args.new_location;
+        if (args.new_notes !== undefined) updates.notes = args.new_notes;
+        if (args.new_category !== undefined) updates.category = args.new_category;
+        if (args.new_priority !== undefined) updates.priority = args.new_priority;
+        if (args.new_status) updates.status = args.new_status;
         if (args.module_name) {
           const m = findModule(modules, args.module_name); if (m) updates.module_id = m.id;
         }
         if (!Object.keys(updates).length) return `⚠️ No changes specified.`;
         const { error } = await supabaseAdmin.from("timetable_entries").update(updates).eq("id", e.id);
         if (error) return `Error: ${error.message}`;
-        return `✅ Updated "${e.title}"${updates.day_of_week !== undefined ? ` → ${dn[updates.day_of_week]}` : ''}.`;
+        return `✅ Updated "${e.title}"${updates.day_of_week !== undefined ? ` → ${dn[updates.day_of_week]}` : ''}${updates.status ? ` (${updates.status})` : ''}.`;
       }
       case "delete_timetable_entry": {
         let q = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.title}%`);
@@ -484,6 +516,33 @@ async function executeTool(
         const { error } = await supabaseAdmin.from("timetable_entries").delete().eq("id", entries[0].id);
         if (error) return `Error: ${error.message}`;
         return `✅ Deleted "${entries[0].title}".`;
+      }
+      case "cancel_timetable_entry": {
+        let q = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId).ilike("title", `%${args.title}%`);
+        if (args.day_of_week !== undefined) q = q.eq("day_of_week", args.day_of_week);
+        const { data: entries } = await q;
+        if (!entries || entries.length === 0) return `❌ No entry matching "${args.title}".`;
+        const { error } = await supabaseAdmin.from("timetable_entries").update({ status: "cancelled" }).eq("id", entries[0].id);
+        if (error) return `Error: ${error.message}`;
+        return `🚫 Cancelled "${entries[0].title}".`;
+      }
+      case "list_timetable_entries": {
+        let q = supabaseAdmin.from("timetable_entries").select("*").eq("user_id", userId);
+        if (args.min_priority) q = q.gte("priority", args.min_priority);
+        const { data: rows } = await q.order("specific_date", { ascending: true });
+        const today = new Date().toISOString().slice(0, 10);
+        const filtered = (rows || []).filter((e: any) => {
+          if (!args.include_passed && e.entry_type === "once" && e.specific_date && e.specific_date < today) return false;
+          if (args.from_date && e.specific_date && e.specific_date < args.from_date) return false;
+          if (args.to_date && e.specific_date && e.specific_date > args.to_date) return false;
+          return true;
+        });
+        if (!filtered.length) return "📭 No matching events.";
+        const dn = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+        return filtered.slice(0, 20).map((e: any) => {
+          const when = e.entry_type === "once" ? e.specific_date : `${dn[e.day_of_week]} (${e.recurrence})`;
+          return `• ${e.title} — ${when} ${e.start_time}–${e.end_time} | P${e.priority} | ${e.status}`;
+        }).join("\n");
       }
       case "log_study_session": {
         const mod = findModule(modules, args.module_name);
