@@ -459,11 +459,16 @@ export default function Timetable() {
           const scheduleLabel = entry.entry_type === "once" && entry.specific_date
             ? format(new Date(entry.specific_date + "T00:00"), "EEE, MMM d yyyy")
             : `${DAY_NAMES_FULL[entry.day_of_week]} (${recurrenceLabel(entry.recurrence ?? "weekly")})`;
+          const dispStatus = entryDisplayStatus(entry);
+          const dim = dispStatus !== "scheduled";
           return (
-            <div key={entry.id} onClick={() => openEdit(entry)} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent transition-colors cursor-pointer group">
+            <div key={entry.id} onClick={() => openEdit(entry)} className={`flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent transition-colors cursor-pointer group ${dim ? "opacity-60" : ""}`}>
               <div className="w-1 h-10 rounded-full shrink-0" style={{ backgroundColor: color }} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{entry.title}</p>
+                <p className={`text-sm font-medium truncate ${dispStatus === "cancelled" ? "line-through" : ""}`}>
+                  {entry.priority >= 4 && <span className="mr-1">{entry.priority === 5 ? "🔥" : "⚠️"}</span>}
+                  {entry.title}
+                </p>
                 <p className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
                   <span>{scheduleLabel}</span>
                   <Clock className="h-3 w-3" /><span>{entry.start_time}–{entry.end_time}</span>
@@ -472,7 +477,11 @@ export default function Timetable() {
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {dispStatus !== "scheduled" && (
+                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{dispStatus}</span>
+                )}
                 <span className="text-[10px] capitalize px-2 py-0.5 rounded-full border" style={{ borderColor: color, color }}>{entry.type}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-muted text-muted-foreground" title="Priority">P{entry.priority}</span>
                 {entry.entry_type === "recurring" && <Repeat className="h-3 w-3 text-muted-foreground" />}
                 <button onClick={(ev) => { ev.stopPropagation(); deleteEntry(entry.id); }} className="opacity-0 group-hover:opacity-100 transition-opacity">
                   <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
