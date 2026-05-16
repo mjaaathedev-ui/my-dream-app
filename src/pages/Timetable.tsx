@@ -702,6 +702,30 @@ export default function Timetable() {
               </Select>
             </div>
             <div className="space-y-1.5"><Label>Location</Label><Input value={form.location} onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))} placeholder="Room / building (optional)" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5"><Label>Priority</Label>
+                <Select value={String(form.priority)} onValueChange={(v) => setForm((p) => ({ ...p, priority: Number(v) }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 — Low</SelectItem>
+                    <SelectItem value="2">2 — Minor</SelectItem>
+                    <SelectItem value="3">3 — Normal</SelectItem>
+                    <SelectItem value="4">4 — High ⚠️</SelectItem>
+                    <SelectItem value="5">5 — Critical 🔥</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label>Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm((p) => ({ ...p, status: v as any }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <div className="space-y-1.5"><Label>Notes</Label><Textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Optional notes…" rows={2} /></div>
             <div className="space-y-1.5"><Label>Colour</Label>
               <div className="flex items-center gap-2 flex-wrap">
