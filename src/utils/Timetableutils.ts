@@ -78,6 +78,22 @@ export function recurrenceLabel(recurrence: string): string {
 export const DAY_NAMES_FULL  = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 export const DAY_NAMES_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/** True for one-time entries whose date+end_time is already in the past. Recurring entries never pass. */
+export function isEntryPassed(entry: TimetableEntry, now: Date = new Date()): boolean {
+  if (entry.entry_type !== 'once' || !entry.specific_date) return false;
+  const [y, m, d] = entry.specific_date.split('-').map(Number);
+  const [h, mm] = (entry.end_time || '23:59').split(':').map(Number);
+  const end = new Date(y, m - 1, d, h, mm || 0);
+  return end.getTime() < now.getTime();
+}
+
+export function entryDisplayStatus(entry: TimetableEntry, now: Date = new Date()): 'scheduled' | 'cancelled' | 'completed' | 'passed' {
+  if (entry.status === 'cancelled') return 'cancelled';
+  if (entry.status === 'completed') return 'completed';
+  if (isEntryPassed(entry, now)) return 'passed';
+  return 'scheduled';
+}
+
 /** Convert JS Date to DB day_of_week (0=Mon … 6=Sun) */
 export function dateToDow(date: Date): number {
   return (date.getDay() + 6) % 7;
