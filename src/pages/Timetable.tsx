@@ -99,6 +99,8 @@ interface TimetableForm {
   module_id: string;
   color: string;
   recurring: boolean;
+  priority: number;
+  status: "scheduled" | "cancelled" | "completed";
 }
 
 const blankForm: TimetableForm = {
@@ -116,6 +118,8 @@ const blankForm: TimetableForm = {
   module_id: "",
   color: TIMETABLE_ENTRY_COLORS.class,
   recurring: true,
+  priority: 3,
+  status: "scheduled",
 };
 
 interface ChatMessage {
