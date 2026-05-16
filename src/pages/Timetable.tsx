@@ -214,6 +214,7 @@ export default function Timetable() {
       start_time: form.start_time, end_time: form.end_time, location: form.location,
       notes: form.notes || null, category: form.category, module_id: form.module_id || null,
       color: form.color, recurring: form.entry_type === "recurring",
+      priority: form.priority, status: form.status,
     };
 
     const conflict = detectConflict(entries, payload, !!editEntry);
