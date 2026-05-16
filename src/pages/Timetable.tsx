@@ -70,6 +70,7 @@ import {
   DAY_NAMES_SHORT,
   dateStringToDow,
   recurrenceLabel,
+  entryDisplayStatus,
 } from "../utils/Timetableutils";
 import { detectConflict } from "../utils/ConflictDetector";
 import {
@@ -99,6 +100,8 @@ interface TimetableForm {
   module_id: string;
   color: string;
   recurring: boolean;
+  priority: number;
+  status: "scheduled" | "cancelled" | "completed";
 }
 
 const blankForm: TimetableForm = {
@@ -116,6 +119,8 @@ const blankForm: TimetableForm = {
   module_id: "",
   color: TIMETABLE_ENTRY_COLORS.class,
   recurring: true,
+  priority: 3,
+  status: "scheduled",
 };
 
 interface ChatMessage {
@@ -191,6 +196,8 @@ export default function Timetable() {
       location: entry.location ?? "", notes: entry.notes ?? "", category: entry.category ?? "Lecture",
       module_id: entry.module_id ?? "", color: entry.color ?? TIMETABLE_ENTRY_COLORS[entry.type] ?? "#2563EB",
       recurring: entry.recurring ?? true,
+      priority: entry.priority ?? 3,
+      status: entry.status ?? "scheduled",
     });
     setEditEntry(entry);
     setShowDialog(true);
@@ -208,6 +215,7 @@ export default function Timetable() {
       start_time: form.start_time, end_time: form.end_time, location: form.location,
       notes: form.notes || null, category: form.category, module_id: form.module_id || null,
       color: form.color, recurring: form.entry_type === "recurring",
+      priority: form.priority, status: form.status,
     };
 
     const conflict = detectConflict(entries, payload, !!editEntry);
@@ -366,14 +374,22 @@ export default function Timetable() {
                 const top = minutesToPx(startMin, PX_PER_HOUR);
                 const height = Math.max(minutesToPx(endMin - startMin, PX_PER_HOUR), 24);
                 const color = entry.color || TIMETABLE_ENTRY_COLORS[entry.type] || "#2563EB";
+                const dispStatus = entryDisplayStatus(entry);
+                const dim = dispStatus === "passed" || dispStatus === "cancelled" || dispStatus === "completed";
                 return (
                   <div key={entry.id} onClick={() => openEdit(entry)}
-                    className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-1 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden group"
+                    className={`absolute left-0.5 right-0.5 rounded-md px-1.5 py-1 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden group ${dim ? "opacity-50" : ""}`}
                     style={{ top, height, backgroundColor: color + "20", borderLeft: `3px solid ${color}` }}>
-                    <p className="text-[11px] font-semibold leading-tight truncate" style={{ color }}>{entry.title}</p>
+                    <p className={`text-[11px] font-semibold leading-tight truncate ${dispStatus === "cancelled" ? "line-through" : ""}`} style={{ color }}>
+                      {entry.priority >= 4 && <span className="mr-0.5">{entry.priority === 5 ? "🔥" : "⚠️"}</span>}
+                      {entry.title}
+                    </p>
                     {height > 32 && <p className="text-[10px] opacity-70 truncate" style={{ color }}>{entry.start_time}–{entry.end_time}</p>}
                     {height > 48 && entry.location && <p className="text-[10px] opacity-60 truncate" style={{ color }}>{entry.location}</p>}
-                    {entry.entry_type === "once" && (
+                    {dispStatus !== "scheduled" && (
+                      <span className="absolute bottom-0.5 right-1 text-[8px] px-1 rounded font-bold uppercase tracking-wide" style={{ backgroundColor: color + "30", color }}>{dispStatus}</span>
+                    )}
+                    {entry.entry_type === "once" && dispStatus === "scheduled" && (
                       <span className="absolute top-0.5 right-5 text-[8px] px-1 rounded-full font-medium" style={{ backgroundColor: color + "30", color }}>1×</span>
                     )}
                     <button onClick={(ev) => { ev.stopPropagation(); deleteEntry(entry.id); }} className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -443,11 +459,16 @@ export default function Timetable() {
           const scheduleLabel = entry.entry_type === "once" && entry.specific_date
             ? format(new Date(entry.specific_date + "T00:00"), "EEE, MMM d yyyy")
             : `${DAY_NAMES_FULL[entry.day_of_week]} (${recurrenceLabel(entry.recurrence ?? "weekly")})`;
+          const dispStatus = entryDisplayStatus(entry);
+          const dim = dispStatus !== "scheduled";
           return (
-            <div key={entry.id} onClick={() => openEdit(entry)} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent transition-colors cursor-pointer group">
+            <div key={entry.id} onClick={() => openEdit(entry)} className={`flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent transition-colors cursor-pointer group ${dim ? "opacity-60" : ""}`}>
               <div className="w-1 h-10 rounded-full shrink-0" style={{ backgroundColor: color }} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{entry.title}</p>
+                <p className={`text-sm font-medium truncate ${dispStatus === "cancelled" ? "line-through" : ""}`}>
+                  {entry.priority >= 4 && <span className="mr-1">{entry.priority === 5 ? "🔥" : "⚠️"}</span>}
+                  {entry.title}
+                </p>
                 <p className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap">
                   <span>{scheduleLabel}</span>
                   <Clock className="h-3 w-3" /><span>{entry.start_time}–{entry.end_time}</span>
@@ -456,7 +477,11 @@ export default function Timetable() {
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {dispStatus !== "scheduled" && (
+                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{dispStatus}</span>
+                )}
                 <span className="text-[10px] capitalize px-2 py-0.5 rounded-full border" style={{ borderColor: color, color }}>{entry.type}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-muted text-muted-foreground" title="Priority">P{entry.priority}</span>
                 {entry.entry_type === "recurring" && <Repeat className="h-3 w-3 text-muted-foreground" />}
                 <button onClick={(ev) => { ev.stopPropagation(); deleteEntry(entry.id); }} className="opacity-0 group-hover:opacity-100 transition-opacity">
                   <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
@@ -677,6 +702,30 @@ export default function Timetable() {
               </Select>
             </div>
             <div className="space-y-1.5"><Label>Location</Label><Input value={form.location} onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))} placeholder="Room / building (optional)" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5"><Label>Priority</Label>
+                <Select value={String(form.priority)} onValueChange={(v) => setForm((p) => ({ ...p, priority: Number(v) }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 — Low</SelectItem>
+                    <SelectItem value="2">2 — Minor</SelectItem>
+                    <SelectItem value="3">3 — Normal</SelectItem>
+                    <SelectItem value="4">4 — High ⚠️</SelectItem>
+                    <SelectItem value="5">5 — Critical 🔥</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label>Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm((p) => ({ ...p, status: v as any }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <div className="space-y-1.5"><Label>Notes</Label><Textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Optional notes…" rows={2} /></div>
             <div className="space-y-1.5"><Label>Colour</Label>
               <div className="flex items-center gap-2 flex-wrap">
