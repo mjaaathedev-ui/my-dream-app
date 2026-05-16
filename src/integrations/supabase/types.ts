@@ -518,46 +518,67 @@ export type Database = {
       }
       timetable_entries: {
         Row: {
+          category: string | null
           color: string | null
           created_at: string
           day_of_week: number
           end_time: string
+          entry_type: string
           id: string
           is_suggested: boolean | null
           location: string | null
           module_id: string | null
+          notes: string | null
+          priority: number
+          recurrence: string
           recurring: boolean | null
+          specific_date: string | null
           start_time: string
+          status: string
           title: string
           type: string
           user_id: string
         }
         Insert: {
+          category?: string | null
           color?: string | null
           created_at?: string
           day_of_week: number
           end_time: string
+          entry_type?: string
           id?: string
           is_suggested?: boolean | null
           location?: string | null
           module_id?: string | null
+          notes?: string | null
+          priority?: number
+          recurrence?: string
           recurring?: boolean | null
+          specific_date?: string | null
           start_time: string
+          status?: string
           title: string
           type?: string
           user_id: string
         }
         Update: {
+          category?: string | null
           color?: string | null
           created_at?: string
           day_of_week?: number
           end_time?: string
+          entry_type?: string
           id?: string
           is_suggested?: boolean | null
           location?: string | null
           module_id?: string | null
+          notes?: string | null
+          priority?: number
+          recurrence?: string
           recurring?: boolean | null
+          specific_date?: string | null
           start_time?: string
+          status?: string
           title?: string
           type?: string
           user_id?: string
