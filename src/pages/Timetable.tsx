@@ -374,14 +374,22 @@ export default function Timetable() {
                 const top = minutesToPx(startMin, PX_PER_HOUR);
                 const height = Math.max(minutesToPx(endMin - startMin, PX_PER_HOUR), 24);
                 const color = entry.color || TIMETABLE_ENTRY_COLORS[entry.type] || "#2563EB";
+                const dispStatus = entryDisplayStatus(entry);
+                const dim = dispStatus === "passed" || dispStatus === "cancelled" || dispStatus === "completed";
                 return (
                   <div key={entry.id} onClick={() => openEdit(entry)}
-                    className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-1 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden group"
+                    className={`absolute left-0.5 right-0.5 rounded-md px-1.5 py-1 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden group ${dim ? "opacity-50" : ""}`}
                     style={{ top, height, backgroundColor: color + "20", borderLeft: `3px solid ${color}` }}>
-                    <p className="text-[11px] font-semibold leading-tight truncate" style={{ color }}>{entry.title}</p>
+                    <p className={`text-[11px] font-semibold leading-tight truncate ${dispStatus === "cancelled" ? "line-through" : ""}`} style={{ color }}>
+                      {entry.priority >= 4 && <span className="mr-0.5">{entry.priority === 5 ? "🔥" : "⚠️"}</span>}
+                      {entry.title}
+                    </p>
                     {height > 32 && <p className="text-[10px] opacity-70 truncate" style={{ color }}>{entry.start_time}–{entry.end_time}</p>}
                     {height > 48 && entry.location && <p className="text-[10px] opacity-60 truncate" style={{ color }}>{entry.location}</p>}
-                    {entry.entry_type === "once" && (
+                    {dispStatus !== "scheduled" && (
+                      <span className="absolute bottom-0.5 right-1 text-[8px] px-1 rounded font-bold uppercase tracking-wide" style={{ backgroundColor: color + "30", color }}>{dispStatus}</span>
+                    )}
+                    {entry.entry_type === "once" && dispStatus === "scheduled" && (
                       <span className="absolute top-0.5 right-5 text-[8px] px-1 rounded-full font-medium" style={{ backgroundColor: color + "30", color }}>1×</span>
                     )}
                     <button onClick={(ev) => { ev.stopPropagation(); deleteEntry(entry.id); }} className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
