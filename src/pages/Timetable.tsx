@@ -195,6 +195,8 @@ export default function Timetable() {
       location: entry.location ?? "", notes: entry.notes ?? "", category: entry.category ?? "Lecture",
       module_id: entry.module_id ?? "", color: entry.color ?? TIMETABLE_ENTRY_COLORS[entry.type] ?? "#2563EB",
       recurring: entry.recurring ?? true,
+      priority: entry.priority ?? 3,
+      status: entry.status ?? "scheduled",
     });
     setEditEntry(entry);
     setShowDialog(true);
