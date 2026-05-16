@@ -144,6 +144,10 @@ export interface TimetableEntry {
   recurring: boolean;
 
   color: string;
+  /** 1 (low) – 5 (critical). Tests/exams default to 5. */
+  priority: number;
+  /** 'scheduled' | 'cancelled' | 'completed' — one-time entries auto-render as Passed when the end has elapsed. */
+  status: 'scheduled' | 'cancelled' | 'completed';
   is_suggested: boolean;
   created_at: string;
 }
