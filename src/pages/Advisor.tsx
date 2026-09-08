@@ -311,6 +311,19 @@ export default function Advisor() {
     }
   };
 
+  // ── Prefilled question from the command palette (?q=...) ────────────────
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (!q || !user || autoSentRef.current) return;
+    autoSentRef.current = true;
+    setSearchParams({}, { replace: true });
+    startNewConversation();
+    setTimeout(() => sendMessage(q, true), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, searchParams]);
+
   const stopStreaming = () => {
     abortRef.current?.abort();
     setLoading(false);
