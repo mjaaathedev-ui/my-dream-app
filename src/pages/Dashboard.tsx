@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, subDays, startOfDay, differenceInDays, isAfter } from 'date-fns';
 import { Target, TrendingUp, Timer, Flame, BookOpen, Calendar, Bot, Plus, Clock, CheckSquare } from 'lucide-react';
-import type { Assessment, StudySession, Module, Quote } from '@/types/database';
+import type { Assessment, StudySession, Module, Quote, TimetableEntry } from '@/types/database';
+import { getEntriesForDate, entryDisplayStatus } from '@/utils/Timetableutils';
 
 export default function Dashboard() {
   const { profile, user } = useAuth();
