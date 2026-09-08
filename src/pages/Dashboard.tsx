@@ -27,13 +27,21 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
     const fetchData = async () => {
-      const [modulesRes, assessmentsRes, sessionsRes, quotesRes, tasksRes] = await Promise.all([
+      const [modulesRes, assessmentsRes, sessionsRes, quotesRes, tasksRes, timetableRes] = await Promise.all([
         supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false),
         supabase.from('assessments').select('*').eq('user_id', user.id),
         supabase.from('study_sessions').select('*').eq('user_id', user.id),
         supabase.from('quotes').select('*').eq('career_field', profile?.career_field || 'Engineering'),
-        supabase.from('tasks').select('id, status, due_date').eq('user_id', user.id),
+        supabase.from('tasks').select('id, title, status, due_date').eq('user_id', user.id),
+        supabase.from('timetable_entries').select('*').eq('user_id', user.id).order('start_time'),
       ]);
+
+      const today = new Date();
+      const todayStr = format(today, 'yyyy-MM-dd');
+      setTodayEntries(
+        getEntriesForDate((timetableRes.data || []) as unknown as TimetableEntry[], today)
+          .filter(e => e.status !== 'cancelled'),
+      );
       setModules((modulesRes.data || []) as Module[]);
       setAssessments((assessmentsRes.data || []) as Assessment[]);
       setSessions((sessionsRes.data || []) as StudySession[]);
