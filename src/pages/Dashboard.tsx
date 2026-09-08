@@ -250,6 +250,57 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Today */}
+      <Card className="border-border shadow-sm">
+        <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-sm font-medium">Today</CardTitle>
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5"
+            onClick={() => navigate('/advisor?q=' + encodeURIComponent('Plan my day based on my classes, tasks and upcoming assessments'))}>
+            <Bot className="h-3.5 w-3.5" /> Plan my day
+          </Button>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Schedule</p>
+            {todayEntries.length > 0 ? (
+              <div className="space-y-1.5">
+                {todayEntries.slice(0, 6).map(e => {
+                  const passed = entryDisplayStatus(e) === 'passed';
+                  return (
+                    <div key={e.id} className={`flex items-center gap-2.5 text-sm ${passed ? 'opacity-50' : ''}`}>
+                      <span className="text-xs font-mono text-muted-foreground w-24 shrink-0">
+                        {e.start_time?.slice(0, 5)}–{e.end_time?.slice(0, 5)}
+                      </span>
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: e.color || '#2563EB' }} />
+                      <span className={`truncate ${passed ? 'line-through' : ''}`}>{e.title}</span>
+                      {e.location && <span className="text-xs text-muted-foreground truncate hidden sm:inline">{e.location}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nothing scheduled today.</p>
+            )}
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Due today</p>
+            {todayTasks.length > 0 ? (
+              <div className="space-y-1.5">
+                {todayTasks.map(t => (
+                  <div key={t.id} className="flex items-center gap-2.5 text-sm cursor-pointer hover:text-primary"
+                    onClick={() => navigate('/tasks')}>
+                    <CheckSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="truncate">{t.title}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No tasks due today.</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Priority cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Next assessment */}
