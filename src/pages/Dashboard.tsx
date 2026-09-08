@@ -20,6 +20,8 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [tasksDue, setTasksDue] = useState(0);
+  const [todayEntries, setTodayEntries] = useState<TimetableEntry[]>([]);
+  const [todayTasks, setTodayTasks] = useState<{ id: string; title: string; status: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
