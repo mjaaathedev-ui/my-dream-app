@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { format, subDays, startOfDay, differenceInDays, isAfter } from 'date-fns';
 import { Target, TrendingUp, Timer, Flame, BookOpen, Calendar, Bot, Plus, Clock, CheckSquare } from 'lucide-react';
-import type { Assessment, StudySession, Module, Quote } from '@/types/database';
+import type { Assessment, StudySession, Module, Quote, TimetableEntry } from '@/types/database';
+import { getEntriesForDate, entryDisplayStatus } from '@/utils/Timetableutils';
 
 export default function Dashboard() {
   const { profile, user } = useAuth();
@@ -19,18 +20,28 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState<StudySession[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [tasksDue, setTasksDue] = useState(0);
+  const [todayEntries, setTodayEntries] = useState<TimetableEntry[]>([]);
+  const [todayTasks, setTodayTasks] = useState<{ id: string; title: string; status: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
     const fetchData = async () => {
-      const [modulesRes, assessmentsRes, sessionsRes, quotesRes, tasksRes] = await Promise.all([
+      const [modulesRes, assessmentsRes, sessionsRes, quotesRes, tasksRes, timetableRes] = await Promise.all([
         supabase.from('modules').select('*').eq('user_id', user.id).eq('archived', false),
         supabase.from('assessments').select('*').eq('user_id', user.id),
         supabase.from('study_sessions').select('*').eq('user_id', user.id),
         supabase.from('quotes').select('*').eq('career_field', profile?.career_field || 'Engineering'),
-        supabase.from('tasks').select('id, status, due_date').eq('user_id', user.id),
+        supabase.from('tasks').select('id, title, status, due_date').eq('user_id', user.id),
+        supabase.from('timetable_entries').select('*').eq('user_id', user.id).order('start_time'),
       ]);
+
+      const today = new Date();
+      const todayStr = format(today, 'yyyy-MM-dd');
+      setTodayEntries(
+        getEntriesForDate((timetableRes.data || []) as unknown as TimetableEntry[], today)
+          .filter(e => e.status !== 'cancelled'),
+      );
       setModules((modulesRes.data || []) as Module[]);
       setAssessments((assessmentsRes.data || []) as Assessment[]);
       setSessions((sessionsRes.data || []) as StudySession[]);
@@ -42,6 +53,12 @@ export default function Dashboard() {
       const activeDue = allTasks.filter((t: any) => t.status !== 'done' && t.due_date && new Date(t.due_date) <= weekFromNow).length;
       const activeTotal = allTasks.filter((t: any) => t.status !== 'done').length;
       setTasksDue(activeDue > 0 ? activeDue : activeTotal);
+      setTodayTasks(
+        allTasks
+          .filter((t: any) => t.status !== 'done' && t.due_date && String(t.due_date).slice(0, 10) <= todayStr)
+          .slice(0, 5)
+          .map((t: any) => ({ id: t.id, title: t.title, status: t.status })),
+      );
 
       const quotes = quotesRes.data as Quote[] || [];
       if (quotes.length > 0) {
@@ -232,6 +249,57 @@ export default function Dashboard() {
           subtitle={lockInStatus.label + ' ' + lockInStatus.emoji} 
         />
       </div>
+
+      {/* Today */}
+      <Card className="border-border shadow-sm">
+        <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-sm font-medium">Today</CardTitle>
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5"
+            onClick={() => navigate('/advisor?q=' + encodeURIComponent('Plan my day based on my classes, tasks and upcoming assessments'))}>
+            <Bot className="h-3.5 w-3.5" /> Plan my day
+          </Button>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Schedule</p>
+            {todayEntries.length > 0 ? (
+              <div className="space-y-1.5">
+                {todayEntries.slice(0, 6).map(e => {
+                  const passed = entryDisplayStatus(e) === 'passed';
+                  return (
+                    <div key={e.id} className={`flex items-center gap-2.5 text-sm ${passed ? 'opacity-50' : ''}`}>
+                      <span className="text-xs font-mono text-muted-foreground w-24 shrink-0">
+                        {e.start_time?.slice(0, 5)}–{e.end_time?.slice(0, 5)}
+                      </span>
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: e.color || '#2563EB' }} />
+                      <span className={`truncate ${passed ? 'line-through' : ''}`}>{e.title}</span>
+                      {e.location && <span className="text-xs text-muted-foreground truncate hidden sm:inline">{e.location}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nothing scheduled today.</p>
+            )}
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Due today</p>
+            {todayTasks.length > 0 ? (
+              <div className="space-y-1.5">
+                {todayTasks.map(t => (
+                  <div key={t.id} className="flex items-center gap-2.5 text-sm cursor-pointer hover:text-primary"
+                    onClick={() => navigate('/tasks')}>
+                    <CheckSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="truncate">{t.title}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No tasks due today.</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Priority cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

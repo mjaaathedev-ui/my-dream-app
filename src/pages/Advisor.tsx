@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -310,6 +311,19 @@ export default function Advisor() {
     }
   };
 
+  // ── Prefilled question from the command palette (?q=...) ────────────────
+  const [searchParams, setSearchParams] = useSearchParams();
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (!q || !user || autoSentRef.current) return;
+    autoSentRef.current = true;
+    setSearchParams({}, { replace: true });
+    startNewConversation();
+    setTimeout(() => sendMessage(q, true), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, searchParams]);
+
   const stopStreaming = () => {
     abortRef.current?.abort();
     setLoading(false);
@@ -317,7 +331,7 @@ export default function Advisor() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-48px)] md:h-screen animate-fade-in" {...getRootProps()}>
+    <div className="flex h-[calc(100vh-48px)] animate-fade-in" {...getRootProps()}>
       <input {...getInputProps()} />
 
       {isDragActive && (
