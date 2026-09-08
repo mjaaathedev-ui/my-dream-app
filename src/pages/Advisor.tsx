@@ -331,7 +331,7 @@ export default function Advisor() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-48px)] md:h-screen animate-fade-in" {...getRootProps()}>
+    <div className="flex h-[calc(100vh-48px)] animate-fade-in" {...getRootProps()}>
       <input {...getInputProps()} />
 
       {isDragActive && (
