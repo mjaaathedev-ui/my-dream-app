@@ -53,6 +53,12 @@ export default function Dashboard() {
       const activeDue = allTasks.filter((t: any) => t.status !== 'done' && t.due_date && new Date(t.due_date) <= weekFromNow).length;
       const activeTotal = allTasks.filter((t: any) => t.status !== 'done').length;
       setTasksDue(activeDue > 0 ? activeDue : activeTotal);
+      setTodayTasks(
+        allTasks
+          .filter((t: any) => t.status !== 'done' && t.due_date && String(t.due_date).slice(0, 10) <= todayStr)
+          .slice(0, 5)
+          .map((t: any) => ({ id: t.id, title: t.title, status: t.status })),
+      );
 
       const quotes = quotesRes.data as Quote[] || [];
       if (quotes.length > 0) {
